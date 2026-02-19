@@ -7,8 +7,15 @@ token = "YOURS"
 
 [server]
 host = "0.0.0.0"
-port = 8114
-domain=["https://manager.example.com", "http://localhost:5173"]  # 配置 CORS
+port = 9000
+domain = ["https://manager.example.com", "http://localhost:5173"]  # 配置 CORS
+
+[db]
+host = "YOURS"
+port = 3306
+user = "YOURS"
+pass = "YOURS"  # 数据库密码
+name = "YOURS"  # Database 名称
 
 [log]
 debug = false

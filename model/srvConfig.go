@@ -1,9 +1,10 @@
 package model
 
-type Config struct {
+type SrvConfig struct {
 	APIKey APIKeyConfig `mapstructure:"apikey"`
 	Secret SecretConfig `mapstructure:"secret"`
 	Server ServerConfig `mapstructure:"server"`
+	Db     DbConfig     `mapstructure:"db"`
 	Log    LogConfig    `mapstructure:"log"`
 }
 
@@ -20,6 +21,14 @@ type ServerConfig struct {
 	Host   string   `mapstructure:"host"`
 	Port   int      `mapstructure:"port"`
 	Domain []string `mapstructure:"domain"` // CORS 允许的域名列表
+}
+
+type DbConfig struct {
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+	User string `mapstructure:"user"`
+	Pass string `mapstructure:"pass"`
+	Name string `mapstructure:"name"`
 }
 
 type LogConfig struct {
