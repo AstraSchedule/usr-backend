@@ -13,7 +13,7 @@ if (test-path .\scf.zip)
 $compress = @{
     Path = ".\scf_bootstrap", ".\config.toml"
     CompressionLevel = "Fastest"
-    DestinationPath = ".\scf.Zip"
+    DestinationPath = ".\scf.zip"
 }
 Compress-Archive @compress
 if (test-path .\scf_bootstrap)
