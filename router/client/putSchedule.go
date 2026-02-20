@@ -59,19 +59,24 @@ func PutSchedule(c *gin.Context) {
 	}()
 
 	tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		UpdateAll: true,
 	}).Create(&cC)
 	tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		UpdateAll: true,
 	}).Create(&schedule)
 	tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		UpdateAll: true,
 	}).Create(&dataVersion)
 	tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
+		UpdateAll: true,
 	}).Create(&subject)
 	tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
+		UpdateAll: true,
 	}).Create(&timetable)
 
 	if err := tx.Commit().Error; err != nil {
