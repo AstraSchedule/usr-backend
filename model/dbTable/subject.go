@@ -1,7 +1,7 @@
 package dbTable
 
 type SubjectConfig struct {
-	SubjectName map[string]string `json:"subject_name" gorm:"type:json;not null"`
+	SubjectName map[string]string `json:"subject_name" gorm:"type:json;not null;serializer:json"`
 }
 
 type Subject struct {

@@ -10,7 +10,7 @@ host = "0.0.0.0"
 port = 9000
 domain = ["https://manager.example.com", "http://localhost:5173"]  # 配置 CORS
 
-[db]
+[db]  # 目前，只支持 MySQL 及兼容 MySQL 的数据库
 host = "YOURS"
 port = 3306
 user = "YOURS"
@@ -20,5 +20,5 @@ name = "YOURS"  # Database 名称
 [log]
 debug = false
 
-[run]
-serverless = true
+[run]  # 目前，Golang 版本还不支持 WebSocket 连接，但预留本项配置，实际上恒为 true
+serverless = true  # 是否使用 Serverless 模式，若为 true，则关闭 WebSocket 功能，适用于云函数的部署

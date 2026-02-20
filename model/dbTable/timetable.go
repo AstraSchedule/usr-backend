@@ -1,16 +1,14 @@
 package dbTable
 
-import "time"
-
 type TimetableItem struct {
 	TimeRange string      `json:"time_range"`
 	Subject   interface{} `json:"subject"` // 可能是数字或字符串
 }
 
 type TimetableConfig struct {
-	Timetable map[string]map[string]interface{} `json:"timetable" gorm:"type:json;not null"`
-	Divider   map[string][]int                  `json:"divider" gorm:"type:json;not null"`
-	Start     time.Time                         `json:"start" gorm:"column:start_date"`
+	Timetable map[string]map[string]interface{} `json:"timetable" gorm:"type:json;not null;serializer:json"`
+	Divider   map[string][]int                  `json:"divider" gorm:"type:json;not null;serializer:json"`
+	Start     string                            `json:"start" gorm:"column:start_date"`
 }
 
 type Timetable struct {
