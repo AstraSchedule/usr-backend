@@ -28,7 +28,8 @@ func GetSchedule(c *gin.Context) {
 		clientDataVersion = carbon.CreateFromTimestamp(cDVInt)
 	}
 	logrus.Infof("school: %s, grade: %s, class: %s, version: %s", school, grade, class, version)
-	serverDataVersion := db.GetLatestVersion(class, school, grade)
+	serverDataVersion := db.GetLatestVersion(school, grade, class)
+	logrus.Infof("serverDataVersion: %s", serverDataVersion)
 	if clientDataVersion.Eq(serverDataVersion) {
 		c.Status(http.StatusNotModified) // 304
 		return
