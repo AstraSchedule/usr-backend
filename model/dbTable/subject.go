@@ -1,9 +1,7 @@
 package dbTable
 
-import "AstraScheduleServerGo/types"
-
 type SubjectConfig struct {
-	SubjectName types.JSONMap `json:"subject_name" gorm:"type:json;not null;serializer:json"`
+	SubjectName map[string]string `json:"subject_name" gorm:"type:json;not null;serializer:json"`
 }
 
 type Subject struct {
