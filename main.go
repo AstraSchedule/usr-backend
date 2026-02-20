@@ -19,6 +19,13 @@ func main() {
 		"AstraSchedule":         model.Configs.Secret.Token,
 		"ElectronClassSchedule": model.Configs.Secret.Token, // 兼容旧版本客户端
 	}))
+
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "Hello World",
+		})
+	})
+
 	// 完整更新课表
 	authorized.PUT("/:school/:grade/:class", client.PutSchedule)
 	// 获取完整课表
