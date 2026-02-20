@@ -3,7 +3,7 @@ package dbTable
 type DailyClass struct {
 	Chinese   string   `json:"chinese"`
 	English   string   `json:"english"`
-	ClassList []string `json:"class_list" gorm:"type:json"`
+	ClassList []string `json:"classList" gorm:"type:json"`
 	Timetable string   `json:"timetable"`
 }
 
