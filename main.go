@@ -21,7 +21,7 @@ func main() {
 	}))
 
 	authorized.PUT("/:school/:grade/:class", client.PutSchedule)
-	authorized.GET("/:school/:grade/:class", client.GetSchedule)
+	router.GET("/:school/:grade/:class", client.GetSchedule)
 
 	err := router.Run("0.0.0.0:9000")
 	if err != nil {
