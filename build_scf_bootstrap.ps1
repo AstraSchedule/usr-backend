@@ -11,7 +11,7 @@ if (test-path .\scf.zip)
 {
     Remove-Item .\scf.zip -Force
 }
-wsl 7z a -tzip ".\scf.zip" ".\scf_bootstrap" ".\config.toml" -mx0
+wsl 7z a -tzip "scf.zip" "scf_bootstrap" "config.toml" -mx0
 if (test-path .\scf_bootstrap)
 {
     Remove-Item .\scf_bootstrap -Force
