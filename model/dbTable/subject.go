@@ -6,7 +6,7 @@ type SubjectConfig struct {
 
 type Subject struct {
 	ID     uint   `gorm:"primaryKey;autoIncrement;not null"`
-	School string `gorm:"uniqueIndex:idx_school_grade,priority:1;not null"`
-	Grade  string `gorm:"uniqueIndex:idx_school_grade,priority:2;not null"`
+	School string `gorm:"uniqueIndex:idx_unique_school_grade,priority:1;not null;size:50"`
+	Grade  string `gorm:"uniqueIndex:idx_unique_school_grade,priority:2;not null;size:50"`
 	SubjectConfig
 }
