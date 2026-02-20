@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/dromara/carbon/v2 v2.6.16
 	github.com/gin-gonic/gin v1.11.0
+	github.com/go-resty/resty/v2 v2.17.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
 	gorm.io/driver/mysql v1.6.0
