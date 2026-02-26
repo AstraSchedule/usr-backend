@@ -53,6 +53,10 @@ func PutSchedule(c *gin.Context) {
 		Version: time.Now(),
 	}
 	tx := db.GetDB().Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "事务开启失败：" + tx.Error.Error()}) // 500
+		return
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
@@ -63,22 +67,47 @@ func PutSchedule(c *gin.Context) {
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&cC)
+	if tx.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存客户端配置失败：" + tx.Error.Error()})
+		return
+	}
 	tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&schedule)
+	if tx.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存课表失败：" + tx.Error.Error()})
+		return
+	}
 	tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&dataVersion)
+	if tx.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存版本号失败：" + tx.Error.Error()})
+		return
+	}
 	tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
 		UpdateAll: true,
 	}).Create(&subject)
+	if tx.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存科目配置失败：" + tx.Error.Error()})
+		return
+	}
 	tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
 		UpdateAll: true,
 	}).Create(&timetable)
+	if tx.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存作息配置失败：" + tx.Error.Error()})
+		return
+	}
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "事务提交失败：" + err.Error()}) // 500

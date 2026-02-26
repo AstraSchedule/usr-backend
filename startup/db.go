@@ -19,6 +19,8 @@ func MigrateDb() {
 		return
 	}
 
+	logrus.Info("开始执行 AutoMigrate")
+
 	err := db.GetDB().AutoMigrate(
 		&dbTable.Schedule{},
 		&dbTable.ClientConfig{},
@@ -31,4 +33,6 @@ func MigrateDb() {
 		logrus.Fatal(err)
 		return
 	}
+
+	logrus.Info("AutoMigrate 执行完成")
 }
