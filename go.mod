@@ -3,6 +3,7 @@ module AstraScheduleServerGo
 go 1.26
 
 require (
+	github.com/daizihan233/go-valence-cal v0.0.0-00010101000000-000000000000
 	github.com/dromara/carbon/v2 v2.6.16
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.2
@@ -54,3 +55,5 @@ require (
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 )
+
+replace github.com/daizihan233/go-valence-cal => ../go-valence-cal

@@ -3,8 +3,10 @@ package client
 import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model"
+	"AstraScheduleServerGo/service"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/dromara/carbon/v2"
 	"github.com/gin-gonic/gin"
@@ -34,14 +36,25 @@ func GetSchedule(c *gin.Context) {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
+	_, _ = db.RefreshAutorunStatuses(time.Now())
 	clientConfig := db.GetClientConfig(school, grade, class)
 	schedule := db.GetSchedule(school, grade, class)
 	subject := db.GetSubject(school, grade)
 	timetable := db.GetTimetable(school, grade)
+	records, _ := db.FetchAutorunRecords("")
+	resolvedDailyClasses := service.ApplyScheduleRules(
+		schedule.DailyClasses,
+		timetable.TimetableConfig.Timetable,
+		records,
+		school,
+		grade,
+		class,
+		time.Now(),
+	)
 	fullResponse := model.FullResponseConfig{
 		SupportWebsocket:  false,
 		Version:           strconv.FormatInt(serverDataVersion.Timestamp(), 10),
-		DailyClasses:      schedule.DailyClasses,
+		DailyClasses:      resolvedDailyClasses,
 		ClientConfigItems: clientConfig.ClientConfigItems,
 		TimetableConfig:   timetable.TimetableConfig,
 		SubjectConfig:     subject.SubjectConfig,

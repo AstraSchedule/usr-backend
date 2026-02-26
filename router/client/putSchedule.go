@@ -1,6 +1,7 @@
 package client
 
 import (
+	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
@@ -51,7 +52,7 @@ func PutSchedule(c *gin.Context) {
 		Class:   class,
 		Version: time.Now(),
 	}
-	tx := model.Db.Begin()
+	tx := db.GetDB().Begin()
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()

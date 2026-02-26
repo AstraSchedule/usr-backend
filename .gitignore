@@ -2,3 +2,4 @@
 config.toml
 !config.template.toml
 temp
+.vscode
