@@ -136,14 +136,44 @@ func toString(v interface{}) string {
 }
 
 func mapAutorunRecord(r dbTable.AutorunRecord) gin.H {
+	content := map[string]interface{}{}
+	if r.Parameters != nil {
+		if rule, ok := r.Parameters["rule"].(map[string]interface{}); ok {
+			content = rule
+		} else {
+			content = r.Parameters
+		}
+	}
+
+	typeName := strconv.Itoa(r.EType)
+	switch r.EType {
+	case 0:
+		typeName = "COMPENSATION"
+	case 1:
+		typeName = "TIMETABLE"
+	case 2:
+		typeName = "SCHEDULE"
+	case 3:
+		typeName = "ALL"
+	}
+
+	statusText := "未知"
+	switch r.Status {
+	case 0:
+		statusText = "待生效"
+	case 1:
+		statusText = "生效中"
+	case 2:
+		statusText = "已过期"
+	}
+
 	return gin.H{
 		"id":       r.HashID,
-		"hashid":   r.HashID,
-		"type":     r.EType,
+		"type":     typeName,
 		"priority": r.Level,
-		"status":   r.Status,
+		"status":   statusText,
 		"scope":    r.Scope,
-		"content":  r.Parameters,
+		"content":  content,
 	}
 }
 
@@ -723,40 +753,60 @@ func PutAllRule(c *gin.Context) {
 }
 
 func CompensationFromHoliday(c *gin.Context) {
-	year := c.Param("year")
-	month := c.Param("month")
-	day := c.Param("day")
-
-	dateStr := fmt.Sprintf("%s-%s-%s", year, month, day)
-	workday, exists := valence.CompensationFromHoliday(dateStr)
-
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "该日期不是调休休息日"})
+	year, err1 := strconv.Atoi(c.Param("year"))
+	month, err2 := strconv.Atoi(c.Param("month"))
+	day, err3 := strconv.Atoi(c.Param("day"))
+	if err1 != nil || err2 != nil || err3 != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
 		return
 	}
 
+	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
+	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+		return
+	}
+
+	workday, exists := valence.CompensationFromHoliday(dateStr)
+	var compensation interface{}
+	if exists {
+		compensation = workday
+	} else {
+		compensation = nil
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"holiday": dateStr,
-		"workday": workday,
+		"date":         dateStr,
+		"compensation": compensation,
 	})
 }
 
 func CompensationFromWorkday(c *gin.Context) {
-	year := c.Param("year")
-	month := c.Param("month")
-	day := c.Param("day")
-
-	dateStr := fmt.Sprintf("%s-%s-%s", year, month, day)
-	holiday, exists := valence.CompensationFromWorkday(dateStr)
-
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "该日期不是补班日"})
+	year, err1 := strconv.Atoi(c.Param("year"))
+	month, err2 := strconv.Atoi(c.Param("month"))
+	day, err3 := strconv.Atoi(c.Param("day"))
+	if err1 != nil || err2 != nil || err3 != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
 		return
 	}
 
+	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
+	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+		return
+	}
+
+	holiday, exists := valence.CompensationFromWorkday(dateStr)
+	var compensation interface{}
+	if exists {
+		compensation = holiday
+	} else {
+		compensation = nil
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"workday": dateStr,
-		"holiday": holiday,
+		"date":         dateStr,
+		"compensation": compensation,
 	})
 }
 
@@ -780,7 +830,6 @@ func CompensationFromYear(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"year":  year,
-		"count": len(pairs),
 		"pairs": result,
 	})
 }
