@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/daizihan233/go-valence-cal v0.0.0-20260226173939-f531718d89a7
 	github.com/dromara/carbon/v2 v2.6.16
+	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-sql-driver/mysql v1.9.3

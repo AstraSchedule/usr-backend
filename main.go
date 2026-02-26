@@ -5,7 +5,9 @@ import (
 	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/router/web"
 	"AstraScheduleServerGo/startup"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -16,6 +18,15 @@ func main() {
 	logrus.Infof("程序初始化流程结束，即将启动 HTTP 服务：%+v", model.Configs)
 
 	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     model.Configs.Server.Domain,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	authorized := router.Group("/", gin.BasicAuth(gin.Accounts{
 		"AstraSchedule":         model.Configs.Secret.Token,
 		"ElectronClassSchedule": model.Configs.Secret.Token, // 兼容旧版本客户端
