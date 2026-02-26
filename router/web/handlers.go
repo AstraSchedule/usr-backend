@@ -768,24 +768,7 @@ func CompensationFromYear(c *gin.Context) {
 		return
 	}
 
-	pairsMap := valence.CompensationPairs(year)
-
-	// 将 map 转换为排序的配对数组
-	var pairs []struct {
-		Holiday string
-		Workday string
-	}
-	for holiday, workday := range pairsMap {
-		pairs = append(pairs, struct {
-			Holiday string
-			Workday string
-		}{holiday, workday})
-	}
-
-	// 按调休休息日日期升序排序
-	sort.Slice(pairs, func(i, j int) bool {
-		return pairs[i].Holiday < pairs[j].Holiday
-	})
+	pairs := valence.CompensationPairs(year)
 
 	result := make([]gin.H, len(pairs))
 	for idx, p := range pairs {
