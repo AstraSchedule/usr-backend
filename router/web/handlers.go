@@ -27,10 +27,6 @@ type subjectsPayload struct {
 	FullName []textItem `json:"fullName"`
 }
 
-type subjectsPayloadWrap struct {
-	Model subjectsPayload `json:"model"`
-}
-
 type dailyClassInput struct {
 	Chinese   string     `json:"Chinese"`
 	English   string     `json:"English"`
@@ -40,10 +36,6 @@ type dailyClassInput struct {
 
 type schedulePayload struct {
 	DailyClass []dailyClassInput `json:"daily_class"`
-}
-
-type schedulePayloadWrap struct {
-	Model schedulePayload `json:"model"`
 }
 
 type autorunPayload struct {
@@ -776,10 +768,28 @@ func CompensationFromYear(c *gin.Context) {
 		return
 	}
 
-	pairs := valence.CompensationPairs(year)
+	pairsMap := valence.CompensationPairs(year)
+
+	// 将 map 转换为排序的配对数组
+	var pairs []struct {
+		Holiday string
+		Workday string
+	}
+	for holiday, workday := range pairsMap {
+		pairs = append(pairs, struct {
+			Holiday string
+			Workday string
+		}{holiday, workday})
+	}
+
+	// 按调休休息日日期升序排序
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].Holiday < pairs[j].Holiday
+	})
+
 	result := make([]gin.H, len(pairs))
-	for i, p := range pairs {
-		result[i] = gin.H{
+	for idx, p := range pairs {
+		result[idx] = gin.H{
 			"holiday": p.Holiday,
 			"workday": p.Workday,
 		}
