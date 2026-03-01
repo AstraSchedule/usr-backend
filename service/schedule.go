@@ -211,15 +211,7 @@ func firstTimetableKey(timetable map[string]map[string]interface{}) string {
 	if _, ok := timetable["常日"]; ok {
 		return "常日"
 	}
-	keys := make([]string, 0, len(timetable))
-	for k := range timetable {
-		keys = append(keys, k)
-	}
-	if len(keys) == 0 {
-		return ""
-	}
-	sort.Strings(keys)
-	return keys[0]
+	return "常日"
 }
 
 func timetableNeedCount(timetable map[string]map[string]interface{}, timetableID string) int {

@@ -5,6 +5,7 @@ import (
 	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/router/web"
 	"AstraScheduleServerGo/startup"
+	"fmt"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -72,6 +73,7 @@ func main() {
 
 	router.GET("/web/config/:school/:grade/:class_number/settings", web.GetSettings)
 	authorized.PUT("/web/config/:school/:grade/:class_number/settings", web.PutSettings)
+	authorized.POST("/web/config/copy", web.CopyConfig)
 
 	// 自动任务
 	router.GET("/web/autorun", web.GetAutorunStatus)
@@ -82,7 +84,7 @@ func main() {
 	authorized.PUT("/web/autorun/schedule", web.PutScheduleRule)
 	authorized.PUT("/web/autorun/all", web.PutAllRule)
 
-	// 调休计算（预留）
+	// 调休计算
 	router.GET("/web/autorun/compensation/holiday/:year/:month/:day", web.CompensationFromHoliday)
 	router.GET("/web/autorun/compensation/workday/:year/:month/:day", web.CompensationFromWorkday)
 	router.GET("/web/autorun/compensation/year/:year", web.CompensationFromYear)
@@ -90,7 +92,7 @@ func main() {
 	// 按日期出课节
 	router.GET("/web/schedule/by-date", web.GetScheduleByDate)
 
-	err := router.Run("0.0.0.0:9000")
+	err := router.Run(fmt.Sprintf("%s:%d", model.Configs.Server.Host, model.Configs.Server.Port))
 	if err != nil {
 		logrus.Fatal(err.Error())
 		return
