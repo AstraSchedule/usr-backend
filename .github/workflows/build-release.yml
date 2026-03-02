@@ -136,10 +136,10 @@ jobs:
             - Windows: `AstraScheduleServerGo-windows-amd64.exe`, `AstraScheduleServerGo-windows-arm64.exe`
             - Linux: `AstraScheduleServerGo-linux-amd64`, `AstraScheduleServerGo-linux-arm64`
             - macOS: `AstraScheduleServerGo-darwin-amd64`, `AstraScheduleServerGo-darwin-arm64`
+            - Config: `config.toml` (from `config.template.toml`)
           files: |
             release_files/*
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
