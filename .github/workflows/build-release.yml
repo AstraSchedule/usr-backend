@@ -112,6 +112,7 @@ jobs:
               cp "$dir"* release_files/
             fi
           done
+          cp config.template.toml release_files/config.toml
           ls -la release_files/
 
       - name: Create Release
