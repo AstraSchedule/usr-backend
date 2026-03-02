@@ -120,19 +120,19 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release ${{ steps.version.outputs.version }}
           body: |
-            # AstraScheduleServerGo Release ${{ steps.version.outputs.version }}
+            # ⭐ AstraScheduleServerGo Release ${{ steps.version.outputs.version }}
             
-            ## ?? 编译信息
+            ## 🏭 编译信息
             - **Action 编号:** ${{ github.run_number }}
             - **提交哈希:** ${{ github.sha }}
             - **分支:** ${{ github.ref_name }}
             
-            ## ?? 支持架构
+            ## 💻 支持架构
             - Linux (amd64, arm64)
             - macOS (amd64, arm64)
             - Windows (amd64, arm64)
             
-            ## ?? 文件包含
+            ## 📂 文件包含
             - Windows: `AstraScheduleServerGo-windows-amd64.exe`, `AstraScheduleServerGo-windows-arm64.exe`
             - Linux: `AstraScheduleServerGo-linux-amd64`, `AstraScheduleServerGo-linux-arm64`
             - macOS: `AstraScheduleServerGo-darwin-amd64`, `AstraScheduleServerGo-darwin-arm64`
