@@ -6,6 +6,7 @@ type SrvConfig struct {
 	Server ServerConfig `mapstructure:"server"`
 	Db     DbConfig     `mapstructure:"db"`
 	Log    LogConfig    `mapstructure:"log"`
+	Run    RunConfig    `mapstructure:"run"`
 }
 
 type APIKeyConfig struct {
@@ -33,4 +34,12 @@ type DbConfig struct {
 
 type LogConfig struct {
 	Debug bool `mapstructure:"debug"`
+}
+
+type RunConfig struct {
+	Serverless bool `mapstructure:"serverless"`
+}
+
+func (c SrvConfig) WebSocketEnabled() bool {
+	return !c.Run.Serverless
 }

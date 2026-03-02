@@ -1,20 +1,161 @@
 package client
 
 import (
+	"AstraScheduleServerGo/model"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 )
 
+type wsScope struct {
+	School string
+	Grade  string
+}
+
+type wsHub struct {
+	mu      sync.RWMutex
+	clients map[wsScope]map[*websocket.Conn]string // conn -> classNumber
+}
+
+var clientWsHub = &wsHub{
+	clients: map[wsScope]map[*websocket.Conn]string{},
+}
+
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+func (h *wsHub) add(scope wsScope, classNumber string, conn *websocket.Conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[scope]; !ok {
+		h.clients[scope] = map[*websocket.Conn]string{}
+	}
+	h.clients[scope][conn] = classNumber
+}
+
+func (h *wsHub) remove(scope wsScope, conn *websocket.Conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	group, ok := h.clients[scope]
+	if !ok {
+		return
+	}
+	delete(group, conn)
+	if len(group) == 0 {
+		delete(h.clients, scope)
+	}
+}
+
+func (h *wsHub) count(scope wsScope) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	group, ok := h.clients[scope]
+	if !ok {
+		return 0
+	}
+	return len(group)
+}
+
+func (h *wsHub) snapshot(scope wsScope) []*websocket.Conn {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	group, ok := h.clients[scope]
+	if !ok {
+		return []*websocket.Conn{}
+	}
+	out := make([]*websocket.Conn, 0, len(group))
+	for conn := range group {
+		out = append(out, conn)
+	}
+	return out
+}
+
+func (h *wsHub) broadcast(scope wsScope, message string) int {
+	conns := h.snapshot(scope)
+	if len(conns) == 0 {
+		return 0
+	}
+	sent := 0
+	for _, conn := range conns {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+			logrus.Warnf("WebSocket 广播失败，将移除连接：scope=%s/%s err=%v", scope.School, scope.Grade, err)
+			h.remove(scope, conn)
+			_ = conn.Close()
+			continue
+		}
+		sent++
+	}
+	return sent
+}
+
 func BroadcastSyncConfig(c *gin.Context) {
+	school := c.Param("school")
+	grade := c.Param("grade")
+	classNumber := c.Param("class_number")
+	if !model.Configs.WebSocketEnabled() {
+		logrus.Infof("收到广播请求：%s 学校 %s 级 %s 班，但当前配置禁用 WebSocket（serverless=true）", school, grade, classNumber)
+		c.JSON(http.StatusOK, gin.H{
+			"status":            200,
+			"message":           "SyncConfig",
+			"sent":              0,
+			"websocket_enabled": false,
+		})
+		return
+	}
+	scope := wsScope{School: school, Grade: grade}
+	sent := clientWsHub.broadcast(scope, "SyncConfig")
+	logrus.Infof("收到广播请求：%s 学校 %s 级 %s 班，已广播 SyncConfig，成功发送 %d 条", school, grade, classNumber, sent)
+	if sent == 0 {
+		logrus.Warnf("未找到可用 websocket 连接：%s %s", school, grade)
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":  200,
-		"message": "SyncConfig",
+		"status":            200,
+		"message":           "SyncConfig",
+		"sent":              sent,
+		"websocket_enabled": true,
 	})
 }
 
 func WebSocketPlaceholder(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"detail": "Golang 版本暂未实现 WebSocket",
-	})
+	if !model.Configs.WebSocketEnabled() {
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"detail": "当前配置禁用 WebSocket（run.serverless=true）",
+		})
+		return
+	}
+
+	school := c.Param("school")
+	grade := c.Param("grade")
+	classNumber := c.Param("class_number")
+	scope := wsScope{School: school, Grade: grade}
+
+	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		logrus.Errorf("WebSocket 升级失败：%v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "WebSocket 升级失败"})
+		return
+	}
+
+	clientWsHub.add(scope, classNumber, conn)
+	logrus.Infof("WebSocket 连接建立：%s 学校 %s 级 %s 班，当前级部连接数=%d", school, grade, classNumber, clientWsHub.count(scope))
+
+	defer func() {
+		clientWsHub.remove(scope, conn)
+		_ = conn.Close()
+		logrus.Infof("WebSocket 连接断开：%s 学校 %s 级 %s 班，当前级部连接数=%d", school, grade, classNumber, clientWsHub.count(scope))
+	}()
+
+	for {
+		_, data, readErr := conn.ReadMessage()
+		if readErr != nil {
+			return
+		}
+		logrus.Infof("收到 WebSocket 数据：%s 学校 %s 级 %s 班 -> %s", school, grade, classNumber, string(data))
+	}
 }

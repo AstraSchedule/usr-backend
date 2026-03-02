@@ -20,5 +20,5 @@ name = "YOURS"  # Database 名称
 [log]
 debug = false
 
-[run]  # 目前，Golang 版本还不支持 WebSocket 连接，但预留本项配置，实际上恒为 true
-serverless = true  # 是否使用 Serverless 模式，若为 true，则关闭 WebSocket 功能，适用于云函数的部署
+[run]
+serverless = true  # 是否使用 Serverless 模式；true=关闭 WebSocket，false=开启 WebSocket

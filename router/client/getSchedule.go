@@ -52,7 +52,7 @@ func GetSchedule(c *gin.Context) {
 		time.Now(),
 	)
 	fullResponse := model.FullResponseConfig{
-		SupportWebsocket:  false,
+		SupportWebsocket:  model.Configs.WebSocketEnabled(),
 		Version:           strconv.FormatInt(serverDataVersion.Timestamp(), 10),
 		DailyClasses:      resolvedDailyClasses,
 		ClientConfigItems: clientConfig.ClientConfigItems,

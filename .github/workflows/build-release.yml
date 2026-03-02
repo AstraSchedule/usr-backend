@@ -1,0 +1,147 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact_name: AstraScheduleServerGo
+            asset_name: AstraScheduleServerGo-linux-amd64
+
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            artifact_name: AstraScheduleServerGo
+            asset_name: AstraScheduleServerGo-linux-arm64
+
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            artifact_name: AstraScheduleServerGo
+            asset_name: AstraScheduleServerGo-darwin-amd64
+
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact_name: AstraScheduleServerGo
+            asset_name: AstraScheduleServerGo-darwin-arm64
+
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact_name: AstraScheduleServerGo.exe
+            asset_name: AstraScheduleServerGo-windows-amd64.exe
+
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            artifact_name: AstraScheduleServerGo.exe
+            asset_name: AstraScheduleServerGo-windows-arm64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.26'
+
+      - name: Get dependencies
+        run: go mod tidy
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o ${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.artifact_name }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build_artifacts
+
+      - name: Generate version
+        id: version
+        run: |
+          # 获取当前日期
+          YEAR=$(date +%Y)
+          MONTH=$(date +%m)
+          DAY=$(date +%d)
+          # GitHub Actions 运行序号
+          RUN_NUMBER=${{ github.run_number }}
+          
+          VERSION="${YEAR}${MONTH}.${DAY}.${RUN_NUMBER}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Generated version: ${VERSION}"
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release_files
+          # 将所有构建的二进制文件整理到一个目录
+          for dir in build_artifacts/*/; do
+            if [ -f "$dir"* ]; then
+              cp "$dir"* release_files/
+            fi
+          done
+          ls -la release_files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            # AstraScheduleServerGo Release ${{ steps.version.outputs.version }}
+            
+            **发布时间：** ${{ steps.version.outputs.version }}
+            
+            ## 🏭 编译信息
+            - **Build Number:** ${{ github.run_number }}
+            - **Commit:** ${{ github.sha }}
+            - **Branch:** ${{ github.ref_name }}
+            
+            ## 💻 支持架构
+            - Linux (amd64, arm64)
+            - macOS (amd64, arm64)
+            - Windows (amd64, arm64)
+            
+            ## 📂 文件包含
+            - Windows: `AstraScheduleServerGo-windows-amd64.exe`, `AstraScheduleServerGo-windows-arm64.exe`
+            - Linux: `AstraScheduleServerGo-linux-amd64`, `AstraScheduleServerGo-linux-arm64`
+            - macOS: `AstraScheduleServerGo-darwin-amd64`, `AstraScheduleServerGo-darwin-arm64`
+          files: |
+            release_files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+
