@@ -65,13 +65,13 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -o ${{ matrix.artifact_name }}
+        run: go build -o ${{ matrix.asset_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_name }}
           retention-days: 1
 
   release:
@@ -122,19 +122,17 @@ jobs:
           body: |
             # AstraScheduleServerGo Release ${{ steps.version.outputs.version }}
             
-            **发布时间：** ${{ steps.version.outputs.version }}
+            ## ?? 编译信息
+            - **Action 编号:** ${{ github.run_number }}
+            - **提交哈希:** ${{ github.sha }}
+            - **分支:** ${{ github.ref_name }}
             
-            ## 🏭 编译信息
-            - **Build Number:** ${{ github.run_number }}
-            - **Commit:** ${{ github.sha }}
-            - **Branch:** ${{ github.ref_name }}
-            
-            ## 💻 支持架构
+            ## ?? 支持架构
             - Linux (amd64, arm64)
             - macOS (amd64, arm64)
             - Windows (amd64, arm64)
             
-            ## 📂 文件包含
+            ## ?? 文件包含
             - Windows: `AstraScheduleServerGo-windows-amd64.exe`, `AstraScheduleServerGo-windows-arm64.exe`
             - Linux: `AstraScheduleServerGo-linux-amd64`, `AstraScheduleServerGo-linux-arm64`
             - macOS: `AstraScheduleServerGo-darwin-amd64`, `AstraScheduleServerGo-darwin-arm64`
@@ -143,5 +141,5 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
