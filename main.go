@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gin-contrib/cache"
+	"github.com/gin-contrib/cache/persistence"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -28,6 +30,8 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	weatherCacheStore := persistence.NewInMemoryStore(10 * time.Minute)
+
 	authorized := router.Group("/", gin.BasicAuth(gin.Accounts{
 		"AstraSchedule":         model.Configs.Secret.Token,
 		"ElectronClassSchedule": model.Configs.Secret.Token, // 兼容旧版本客户端
@@ -44,14 +48,14 @@ func main() {
 	// 获取完整课表
 	router.GET("/:school/:grade/:class", client.GetSchedule)
 	// 通过省份和城市查询天气
-	router.GET("/api/weather/:name1/:name2", client.GetWeatherWithProvince)
+	router.GET("/api/weather/:name1/:name2", cache.CachePage(weatherCacheStore, 10*time.Minute, client.GetWeatherWithProvince))
 	// 通过省份和城市查询天气
-	router.GET("/api/weather/:name1", client.GetWeatherWithCity)
+	router.GET("/api/weather/:name1", cache.CachePage(weatherCacheStore, 10*time.Minute, client.GetWeatherWithCity))
 	// 通过 CF 头查询天气
 	router.GET("/api/weather/", client.GetWeatherWithCFHeader)
-	// WebSocket（当前仅占位）
+	// WebSocket
 	router.Any("/ws/:school/:grade/:class_number", client.WebSocketPlaceholder)
-	// 广播（当前仅占位）
+	// 广播
 	authorized.POST("/api/broadcast/:school/:grade/:class_number", client.BroadcastSyncConfig)
 
 	// 统计/菜单/结构

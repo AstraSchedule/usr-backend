@@ -1,6 +1,12 @@
 [apikey]
-weather = "YOURS"
 apihost = "YOURS.re.qweatherapi.com"  # 尚只接收和风天气 API
+weather = "YOURS"      # 兜底 API Key：当 JWT 未完整填写时使用；若 JWT 与该项都未填写则天气接口返回 403
+
+[apikey.jwt]
+kid = ""               # JWT 凭据 ID（与 project_id、private_key_pem 同时填写才会启用 JWT）
+project_id = ""        # JWT 项目 ID
+private_key_pem = ""   # 支持完整 PEM 或单行 Base64(PKCS8 DER)
+expires = 900           # JWT 有效期（秒），范围 1~86400
 
 [secret]
 token = "YOURS"

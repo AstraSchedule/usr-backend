@@ -2,12 +2,18 @@ package client
 
 import (
 	"AstraScheduleServerGo/model"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
@@ -17,8 +23,125 @@ import (
 // cache 缓存城市查询结果 (name, adm) -> LocationResp
 var cache sync.Map
 
+var errNoQWeatherCredential = errors.New("和风天气认证信息未配置")
+
+type qweatherJWTHeader struct {
+	Alg string `json:"alg"`
+	Kid string `json:"kid"`
+}
+
+type qweatherJWTPayload struct {
+	Sub string `json:"sub"`
+	Iat int64  `json:"iat"`
+	Exp int64  `json:"exp"`
+}
+
+func createQWeatherRequest(client *resty.Client, cfg model.APIKeyConfig) (*resty.Request, error) {
+	req := client.R()
+
+	if cfg.HasJWT() {
+		token, err := generateQWeatherJWT(cfg.JWT)
+		if err != nil {
+			return nil, fmt.Errorf("生成 JWT 失败: %w", err)
+		}
+		req.SetHeader("Authorization", "Bearer "+token)
+		return req, nil
+	}
+
+	if cfg.HasAPIKey() {
+		req.SetHeader("X-QW-Api-Key", strings.TrimSpace(cfg.Weather))
+		return req, nil
+	}
+
+	return nil, errNoQWeatherCredential
+}
+
+func parseEd25519PrivateKey(privateKeyPEM string) (ed25519.PrivateKey, error) {
+	text := strings.TrimSpace(privateKeyPEM)
+	if text == "" {
+		return nil, fmt.Errorf("JWT 私钥不能为空")
+	}
+
+	text = strings.ReplaceAll(text, "\\n", "\n")
+
+	var der []byte
+	if strings.Contains(text, "-----BEGIN") {
+		block, _ := pem.Decode([]byte(text))
+		if block == nil {
+			return nil, fmt.Errorf("JWT 私钥 PEM 解析失败")
+		}
+		der = block.Bytes
+	} else {
+		base64Text := strings.ReplaceAll(text, "\n", "")
+		base64Text = strings.ReplaceAll(base64Text, "\r", "")
+		base64Text = strings.ReplaceAll(base64Text, " ", "")
+
+		var err error
+		der, err = base64.StdEncoding.DecodeString(base64Text)
+		if err != nil {
+			der, err = base64.RawStdEncoding.DecodeString(base64Text)
+			if err != nil {
+				return nil, fmt.Errorf("JWT 私钥解析失败：请提供 PEM 或 PKCS8 DER 的 Base64 单行字符串")
+			}
+		}
+	}
+
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("JWT 私钥不是合法 PKCS8: %w", err)
+	}
+
+	privateKey, ok := parsed.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("JWT 私钥不是 Ed25519")
+	}
+
+	return privateKey, nil
+}
+
+func generateQWeatherJWT(cfg model.JWTAuthConfig) (string, error) {
+	privateKey, err := parseEd25519PrivateKey(cfg.PrivateKeyPEM)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now().Unix()
+	iat := now - 30
+	expires := cfg.Expires
+	if expires == 0 {
+		expires = 900
+	}
+	exp := iat + expires
+
+	headerBytes, err := json.Marshal(qweatherJWTHeader{
+		Alg: "EdDSA",
+		Kid: cfg.KID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("JWT Header 序列化失败: %w", err)
+	}
+
+	payloadBytes, err := json.Marshal(qweatherJWTPayload{
+		Sub: cfg.ProjectID,
+		Iat: iat,
+		Exp: exp,
+	})
+	if err != nil {
+		return "", fmt.Errorf("JWT Payload 序列化失败: %w", err)
+	}
+
+	headerEncoded := base64.RawURLEncoding.EncodeToString(headerBytes)
+	payloadEncoded := base64.RawURLEncoding.EncodeToString(payloadBytes)
+	signingInput := headerEncoded + "." + payloadEncoded
+
+	signature := ed25519.Sign(privateKey, []byte(signingInput))
+	signatureEncoded := base64.RawURLEncoding.EncodeToString(signature)
+
+	return signingInput + "." + signatureEncoded, nil
+}
+
 // cityLookup 查询城市位置信息
-func cityLookup(name, adm, host, key string) (*model.LocationResp, error) {
+func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.LocationResp, error) {
 	// 如果没有提供城市名，直接返回错误
 	if name == "" {
 		return nil, fmt.Errorf("城市名不能为空")
@@ -47,9 +170,11 @@ func cityLookup(name, adm, host, key string) (*model.LocationResp, error) {
 
 	// 使用 resty 发起请求
 	client := resty.New()
-	resp, err := client.R().
-		SetHeader("X-QW-Api-Key", key).
-		Get(url)
+	req, err := createQWeatherRequest(client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := req.Get(url)
 
 	if err != nil {
 		return nil, fmt.Errorf("请求API失败: %w", err)
@@ -102,13 +227,15 @@ func cityLookup(name, adm, host, key string) (*model.LocationResp, error) {
 }
 
 // weatherLookup 查询指定位置的天气信息
-func weatherLookup(location, host, key string) (*model.WeatherResp, error) {
+func weatherLookup(location, host string, cfg model.APIKeyConfig) (*model.WeatherResp, error) {
 	url := fmt.Sprintf("https://%s/v7/weather/now?location=%s", host, location)
 
 	client := resty.New()
-	resp, err := client.R().
-		SetHeader("X-QW-Api-Key", key).
-		Get(url)
+	req, err := createQWeatherRequest(client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := req.Get(url)
 
 	if err != nil {
 		return nil, fmt.Errorf("请求天气API失败: %w", err)
@@ -131,25 +258,27 @@ func weatherLookup(location, host, key string) (*model.WeatherResp, error) {
 }
 
 // weatherLookupByName 查询天气信息
-func weatherLookupByName(name, adm, host, key string) (*model.WeatherResp, error) {
+func weatherLookupByName(name, adm, host string, cfg model.APIKeyConfig) (*model.WeatherResp, error) {
 	// 首先通过城市名称获取城市ID
-	locationInfo, err := cityLookup(name, adm, host, key)
+	locationInfo, err := cityLookup(name, adm, host, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("获取城市信息失败: %w", err)
 	}
 
 	// 使用城市ID查询天气
-	return weatherLookup(locationInfo.ID, host, key)
+	return weatherLookup(locationInfo.ID, host, cfg)
 }
 
 // weatherWarningLookup 查询指定位置的天气预警信息
-func weatherWarningLookup(lat, lon, host, key string) (*model.WarningResp, error) {
+func weatherWarningLookup(lat, lon, host string, cfg model.APIKeyConfig) (*model.WarningResp, error) {
 	url := fmt.Sprintf("https://%s/weatheralert/v1/current/%s/%s", host, lat, lon)
 
 	client := resty.New()
-	resp, err := client.R().
-		SetHeader("X-QW-Api-Key", key).
-		Get(url)
+	req, err := createQWeatherRequest(client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := req.Get(url)
 
 	if err != nil {
 		return nil, fmt.Errorf("请求天气预警API失败: %w", err)
@@ -168,9 +297,9 @@ func weatherWarningLookup(lat, lon, host, key string) (*model.WarningResp, error
 }
 
 // weatherWarningLookupByName 查询天气预警信息
-func weatherWarningLookupByName(name, adm, host, key string) (*model.WarningResp, error) {
+func weatherWarningLookupByName(name, adm, host string, cfg model.APIKeyConfig) (*model.WarningResp, error) {
 	// 首先通过城市名称获取城市信息
-	locationInfo, err := cityLookup(name, adm, host, key)
+	locationInfo, err := cityLookup(name, adm, host, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("获取城市信息失败: %w", err)
 	}
@@ -178,7 +307,7 @@ func weatherWarningLookupByName(name, adm, host, key string) (*model.WarningResp
 	// 使用城市经纬度查询天气预警
 	lat := fmt.Sprintf("%.5f", locationInfo.Lat) // 保留5位小数
 	lon := fmt.Sprintf("%.5f", locationInfo.Lon) // 保留5位小数
-	return weatherWarningLookup(lat, lon, host, key)
+	return weatherWarningLookup(lat, lon, host, cfg)
 }
 
 // getWeather 获取指定城市的天气信息
@@ -193,13 +322,19 @@ func getWeather(c *gin.Context, name, province string) {
 			}()
 
 			// 从配置中获取 API 信息
-			apiKey := model.Configs.APIKey
-			host := apiKey.APIHost
-			key := apiKey.Weather
+			apiCfg := model.Configs.APIKey
+			host := apiCfg.APIHost
 
 			// 查找城市位置
-			locationResp, err := cityLookup(name, province, host, key)
+			locationResp, err := cityLookup(name, province, host, apiCfg)
 			if err != nil {
+				if errors.Is(err, errNoQWeatherCredential) {
+					logrus.Errorf("天气认证未配置: %v", err)
+					c.JSON(http.StatusForbidden, gin.H{
+						"error": "未配置天气认证信息：请配置 JWT（kid/project_id/private_key_pem）或 apikey.weather",
+					})
+					return
+				}
 				logrus.Errorf("获取城市位置失败: %v", err)
 				c.JSON(http.StatusNotFound, gin.H{
 					"temp":       "404",
@@ -211,14 +346,14 @@ func getWeather(c *gin.Context, name, province string) {
 			}
 
 			// 获取天气信息
-			resp, err := weatherLookupByName(name, province, host, key)
+			resp, err := weatherLookupByName(name, province, host, apiCfg)
 			if err != nil {
 				logrus.Errorf("获取天气信息失败: %v", err)
 				return
 			}
 
 			// 获取天气预警信息
-			warnResp, err := weatherWarningLookupByName(name, province, host, key)
+			warnResp, err := weatherWarningLookupByName(name, province, host, apiCfg)
 			if err != nil {
 				logrus.Errorf("获取天气预警信息失败: %v", err)
 				warnResp = &model.WarningResp{Alerts: []model.Alert{}}
@@ -254,7 +389,6 @@ func getWeather(c *gin.Context, name, province string) {
 				Warn:      warn,
 				BriefWarn: briefWarn,
 			})
-			return
 		}()
 
 		// 如果响应已经写入，说明请求已处理（成功或失败），直接返回
