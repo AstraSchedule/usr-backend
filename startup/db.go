@@ -44,6 +44,7 @@ func MigrateDb() {
 		&dbTable.Subject{},
 		&dbTable.DataVersion{},
 		&dbTable.AutorunRecord{},
+		&dbTable.CountdownRecord{},
 	)
 	if err != nil {
 		logrus.Fatal(err)

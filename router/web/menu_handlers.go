@@ -65,7 +65,7 @@ func listClasses(school, grade string) ([]string, error) {
 }
 
 func GetMenu(c *gin.Context) {
-	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}}}
+	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}, {"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil}}}
 	data := menu["data"].([]gin.H)
 	schools, err := listSchools()
 	if err != nil {
@@ -89,6 +89,7 @@ func GetMenu(c *gin.Context) {
 					"children": []gin.H{
 						{"to": "/config/" + school + "/" + grade + "/" + classNumber + "/schedule", "text": "课表设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-schedule", "children": nil},
 						{"to": "/config/" + school + "/" + grade + "/" + classNumber + "/settings", "text": "通用设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-settings", "children": nil},
+						{"to": "/countdown", "text": "倒数日设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-countdown", "children": nil},
 					},
 				})
 			}

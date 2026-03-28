@@ -28,6 +28,18 @@ type autorunPayload struct {
 	Content  map[string]interface{} `json:"content"`
 }
 
+type countdownScheduleInput struct {
+	Name     string `json:"name"`
+	Date     string `json:"date"`
+	Priority int    `json:"priority"`
+}
+
+type countdownPayload struct {
+	ID        string                   `json:"id"`
+	Scope     interface{}              `json:"scope"`
+	Schedules []countdownScheduleInput `json:"schedules"`
+}
+
 type copyScopePayload struct {
 	School      string `json:"school"`
 	Grade       string `json:"grade"`

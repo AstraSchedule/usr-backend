@@ -88,6 +88,12 @@ func main() {
 	authorized.PUT("/web/autorun/schedule", web.PutScheduleRule)
 	authorized.PUT("/web/autorun/all", web.PutAllRule)
 
+	// 倒数日配置
+	router.GET("/web/countdown", web.GetCountdownStatus)
+	router.GET("/web/countdown/:id", web.GetCountdownByID)
+	authorized.PUT("/web/countdown", web.PutCountdownRule)
+	authorized.DELETE("/web/countdown/:id", web.DeleteCountdownRecord)
+
 	// 调休计算
 	router.GET("/web/autorun/compensation/holiday/:year/:month/:day", web.CompensationFromHoliday)
 	router.GET("/web/autorun/compensation/workday/:year/:month/:day", web.CompensationFromWorkday)
