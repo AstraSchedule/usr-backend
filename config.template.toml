@@ -16,12 +16,18 @@ host = "0.0.0.0"
 port = 9000
 domain = ["https://manager.example.com", "http://localhost:5173"]  # 配置 CORS
 
-[db]  # 目前，只支持 MySQL 及兼容 MySQL 的数据库
+[db]
+type = "mysql"  # 可选: mysql / sqlite
+
+# MySQL 配置（type=mysql 时使用）
 host = "YOURS"
 port = 3306
 user = "YOURS"
 pass = "YOURS"  # 数据库密码
 name = "YOURS"  # Database 名称
+
+# SQLite 配置（type=sqlite 时使用）
+path = "./data/astra_schedule.db"
 
 [log]
 debug = false

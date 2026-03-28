@@ -38,11 +38,13 @@ type ServerConfig struct {
 }
 
 type DbConfig struct {
+	Type string `mapstructure:"type"`
 	Host string `mapstructure:"host"`
 	Port int    `mapstructure:"port"`
 	User string `mapstructure:"user"`
 	Pass string `mapstructure:"pass"`
 	Name string `mapstructure:"name"`
+	Path string `mapstructure:"path"`
 }
 
 type LogConfig struct {
@@ -61,6 +63,40 @@ func (c SrvConfig) Validate() error {
 	if err := c.APIKey.Validate(); err != nil {
 		return err
 	}
+	if err := c.Db.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c DbConfig) Validate() error {
+	dbType := strings.ToLower(strings.TrimSpace(c.Type))
+	if dbType == "" {
+		dbType = "mysql"
+	}
+
+	switch dbType {
+	case "mysql":
+		if strings.TrimSpace(c.Host) == "" {
+			return fmt.Errorf("db.host 不能为空")
+		}
+		if c.Port <= 0 {
+			return fmt.Errorf("db.port 必须大于 0")
+		}
+		if strings.TrimSpace(c.User) == "" {
+			return fmt.Errorf("db.user 不能为空")
+		}
+		if strings.TrimSpace(c.Name) == "" {
+			return fmt.Errorf("db.name 不能为空")
+		}
+	case "sqlite":
+		if strings.TrimSpace(c.Path) == "" {
+			return fmt.Errorf("db.path 不能为空（sqlite 模式）")
+		}
+	default:
+		return fmt.Errorf("db.type 仅支持 mysql 或 sqlite")
+	}
+
 	return nil
 }
 
