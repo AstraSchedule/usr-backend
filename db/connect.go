@@ -3,12 +3,16 @@ package db
 import (
 	"AstraScheduleServerGo/model"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
 	gormmysql "gorm.io/driver/mysql"
+	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -20,26 +24,47 @@ var (
 
 func ConnectDb() *gorm.DB {
 	dbOnce.Do(func() {
-		cfg := mysql.NewConfig()
-		cfg.User = model.Configs.Db.User
-		cfg.Passwd = model.Configs.Db.Pass
-		cfg.Net = "tcp"
-		cfg.Addr = fmt.Sprintf("%s:%d", model.Configs.Db.Host, model.Configs.Db.Port)
-		cfg.DBName = model.Configs.Db.Name
-		cfg.ParseTime = true
-		cfg.Loc = time.Local
-		cfg.Params = map[string]string{
-			"charset": "utf8mb4",
+		dbType := strings.ToLower(strings.TrimSpace(model.Configs.Db.Type))
+		if dbType == "" {
+			dbType = "mysql"
 		}
 
-		dsn := cfg.FormatDSN()
+		var dialector gorm.Dialector
+		switch dbType {
+		case "sqlite":
+			dir := filepath.Dir(model.Configs.Db.Path)
+			if dir != "" && dir != "." {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					dbErr = fmt.Errorf("failed to create sqlite directory: %w", err)
+					return
+				}
+			}
+			logrus.Infof("Connecting to SQLite database: %s", model.Configs.Db.Path)
+			dialector = gormsqlite.Open(model.Configs.Db.Path)
+		default:
+			cfg := mysql.NewConfig()
+			cfg.User = model.Configs.Db.User
+			cfg.Passwd = model.Configs.Db.Pass
+			cfg.Net = "tcp"
+			cfg.Addr = fmt.Sprintf("%s:%d", model.Configs.Db.Host, model.Configs.Db.Port)
+			cfg.DBName = model.Configs.Db.Name
+			cfg.ParseTime = true
+			cfg.Loc = time.Local
+			cfg.Params = map[string]string{
+				"charset": "utf8mb4",
+			}
 
-		logrus.Infof("Connecting to database: %s@%s:%d/%s",
-			model.Configs.Db.User,
-			model.Configs.Db.Host,
-			model.Configs.Db.Port,
-			model.Configs.Db.Name)
-		db, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
+			dsn := cfg.FormatDSN()
+
+			logrus.Infof("Connecting to MySQL database: %s@%s:%d/%s",
+				model.Configs.Db.User,
+				model.Configs.Db.Host,
+				model.Configs.Db.Port,
+				model.Configs.Db.Name)
+			dialector = gormmysql.Open(dsn)
+		}
+
+		db, err := gorm.Open(dialector, &gorm.Config{})
 		if err != nil {
 			logrus.Errorf("Failed to connect to database: %v", err)
 			dbErr = fmt.Errorf("database connection failed: %w", err)
