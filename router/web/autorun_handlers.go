@@ -10,6 +10,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	invalidArgPrefix = "无效参数: "
+	dateLayout       = "2006-01-02"
+)
+
+func badRequestDetail(c *gin.Context, detail string) {
+	c.JSON(http.StatusBadRequest, gin.H{"detail": detail})
+}
+
+func badRequestInvalidArg(c *gin.Context, detail string) {
+	badRequestDetail(c, invalidArgPrefix+detail)
+}
+
+func validateDateField(c *gin.Context, fieldName string, value string) bool {
+	if _, err := time.Parse(dateLayout, value); err != nil {
+		badRequestInvalidArg(c, fieldName+" 格式错误")
+		return false
+	}
+	return true
+}
+
+func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
+	scope := parseScopeInput(payload.Scope)
+	if hashID == "" {
+		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
+	}
+	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
+	if err := db.UpsertAutorunRecord(&record); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = db.RefreshAutorunStatuses(time.Now())
+	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+}
+
 func mapAutorunRecord(r dbTable.AutorunRecord) gin.H {
 	content := map[string]interface{}{}
 	if r.Parameters != nil {
@@ -99,7 +134,7 @@ func DeleteAutorunRecord(c *gin.Context) {
 func PutCompensationRule(c *gin.Context) {
 	var payload autorunPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
+		badRequestInvalidArg(c, err.Error())
 		return
 	}
 	if payload.Type != 0 {
@@ -107,130 +142,91 @@ func PutCompensationRule(c *gin.Context) {
 	}
 	dateStr, _ := payload.Content["date"].(string)
 	useDateStr, _ := payload.Content["useDate"].(string)
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: date 格式错误"})
+	if !validateDateField(c, "date", dateStr) {
 		return
 	}
-	if _, err := time.Parse("2006-01-02", useDateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: useDate 格式错误"})
+	if !validateDateField(c, "useDate", useDateStr) {
 		return
 	}
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "useDate": useDateStr}}
-	scope := parseScopeInput(payload.Scope)
-	hashID := makeHashID(payload.Type, scope, payload.Priority, params)
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
-	if err := db.UpsertAutorunRecord(&record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+	persistAutorunRule(c, payload, params, "")
 }
 
 func PutTimetableRule(c *gin.Context) {
 	var payload autorunPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
+		badRequestInvalidArg(c, err.Error())
 		return
 	}
 	payload.Type = 1
 	dateStr, _ := payload.Content["date"].(string)
 	timetableID, _ := payload.Content["timetableId"].(string)
 	if timetableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: timetableId 必须为非空字符串"})
+		badRequestInvalidArg(c, "timetableId 必须为非空字符串")
 		return
 	}
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: date 格式错误"})
+	if !validateDateField(c, "date", dateStr) {
 		return
 	}
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "timetableId": timetableID}}
-	scope := parseScopeInput(payload.Scope)
 	hashID := payload.ID
 	if hashID == "" {
 		if idInContent, ok := payload.Content["id"].(string); ok {
 			hashID = idInContent
 		}
 	}
-	if hashID == "" {
-		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
-	}
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
-	if err := db.UpsertAutorunRecord(&record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+	persistAutorunRule(c, payload, params, hashID)
 }
 
 func PutScheduleRule(c *gin.Context) {
 	var payload autorunPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
+		badRequestInvalidArg(c, err.Error())
 		return
 	}
 	payload.Type = 2
 	dateStr, _ := payload.Content["date"].(string)
 	scheduleObj, ok := payload.Content["schedule"].(map[string]interface{})
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "content.schedule 必须为对象"})
+		badRequestDetail(c, "content.schedule 必须为对象")
 		return
 	}
 	if _, ok := scheduleObj["periods"].([]interface{}); !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "content.schedule.periods 必须为数组"})
+		badRequestDetail(c, "content.schedule.periods 必须为数组")
 		return
 	}
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: date 格式错误"})
+	if !validateDateField(c, "date", dateStr) {
 		return
 	}
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "schedule": map[string]interface{}{"periods": scheduleObj["periods"]}}}
-	scope := parseScopeInput(payload.Scope)
-	hashID := makeHashID(payload.Type, scope, payload.Priority, params)
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
-	if err := db.UpsertAutorunRecord(&record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+	persistAutorunRule(c, payload, params, "")
 }
 
 func PutAllRule(c *gin.Context) {
 	var payload autorunPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
+		badRequestInvalidArg(c, err.Error())
 		return
 	}
 	payload.Type = 3
 	dateStr, _ := payload.Content["date"].(string)
 	timetableID, _ := payload.Content["timetableId"].(string)
 	if timetableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "content.timetableId 必须为非空字符串"})
+		badRequestDetail(c, "content.timetableId 必须为非空字符串")
 		return
 	}
 	scheduleObj, ok := payload.Content["schedule"].(map[string]interface{})
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "content.schedule 必须为对象"})
+		badRequestDetail(c, "content.schedule 必须为对象")
 		return
 	}
 	if _, ok := scheduleObj["periods"].([]interface{}); !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "content.schedule.periods 必须为数组"})
+		badRequestDetail(c, "content.schedule.periods 必须为数组")
 		return
 	}
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: date 格式错误"})
+	if !validateDateField(c, "date", dateStr) {
 		return
 	}
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "timetableId": timetableID, "schedule": map[string]interface{}{"periods": scheduleObj["periods"]}}}
-	scope := parseScopeInput(payload.Scope)
-	hashID := makeHashID(payload.Type, scope, payload.Priority, params)
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
-	if err := db.UpsertAutorunRecord(&record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+	persistAutorunRule(c, payload, params, "")
 }

@@ -10,10 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func ConnectDb() {
-	db.GetDB().Debug()
-}
-
 func shouldSkipAutoMigrate() bool {
 	raw := strings.TrimSpace(os.Getenv("GIN_MODE"))
 	if raw == "" {

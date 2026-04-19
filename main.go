@@ -62,6 +62,8 @@ func main() {
 	router.GET("/web/statistic", web.GetStatistic)
 	router.GET("/web/menu", web.GetMenu)
 	router.GET("/web/structure", web.GetStructure)
+	authorized.GET("/web/backup/export", web.ExportBackup)
+	authorized.POST("/web/backup/import", web.ImportBackup)
 
 	// 配置接口
 	router.GET("/web/config/:school/:grade/subjects/options", web.GetSubjectsOptions)

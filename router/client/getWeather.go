@@ -310,98 +310,94 @@ func weatherWarningLookupByName(name, adm, host string, cfg model.APIKeyConfig) 
 	return weatherWarningLookup(lat, lon, host, cfg)
 }
 
-// getWeather 获取指定城市的天气信息
+func buildWeatherResponse(locationResp *model.LocationResp, warnResp *model.WarningResp, resp *model.WeatherResp) model.WeatherResponse {
+	var warnParts []string
+	var briefWarnParts []string
+	for _, alert := range warnResp.Alerts {
+		warnParts = append(warnParts, strings.ReplaceAll(alert.Description, "\n", ""))
+		briefWarnParts = append(briefWarnParts, strings.ReplaceAll(alert.Headline, "\n", ""))
+	}
+	return model.WeatherResponse{
+		Where:     locationResp.Name,
+		Temp:      resp.Now.Temp,
+		Weat:      resp.Now.Text,
+		Wind:      resp.Now.WindDir,
+		WindPower: resp.Now.WindScale,
+		Warn:      strings.Join(warnParts, "；"),
+		BriefWarn: strings.Join(briefWarnParts, "；"),
+	}
+}
+
+func tryGetWeatherOnce(c *gin.Context, name, province, host string, apiCfg model.APIKeyConfig) bool {
+	defer func() {
+		if r := recover(); r != nil {
+			logrus.Errorf("获取天气信息时发生 panic: %v", r)
+		}
+	}()
+
+	locationResp, err := cityLookup(name, province, host, apiCfg)
+	if err != nil {
+		handleWeatherError(c, err)
+		return true
+	}
+
+	resp, err := weatherLookupByName(name, province, host, apiCfg)
+	if err != nil {
+		logrus.Errorf("获取天气信息失败: %v", err)
+		return false
+	}
+
+	warnResp, _ := weatherWarningLookupByName(name, province, host, apiCfg)
+	if warnResp == nil {
+		warnResp = &model.WarningResp{Alerts: []model.Alert{}}
+	}
+
+	logrus.Infof(
+		"获取 %s/%s（%s） 的天气信息，T: %s, W: %s, Warning: %s, Brief: %s",
+		province, name, locationResp.Name, resp.Now.Temp, resp.Now.Text,
+		resp.Now.WindDir, resp.Now.WindScale,
+	)
+
+	c.JSON(http.StatusOK, buildWeatherResponse(locationResp, warnResp, resp))
+	return true
+}
+
+func handleWeatherError(c *gin.Context, err error) {
+	if errors.Is(err, errNoQWeatherCredential) {
+		logrus.Errorf("天气认证未配置: %v", err)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "未配置天气认证信息：请配置 JWT（kid/project_id/private_key_pem）或 apikey.weather",
+		})
+		return
+	}
+	logrus.Errorf("获取城市位置失败: %v", err)
+	c.JSON(http.StatusNotFound, gin.H{
+		"temp":       "404",
+		"weat":       "不存在",
+		"warning":    "",
+		"brief_warn": "",
+	})
+}
+
+func getWeatherOnce(c *gin.Context, name, province string) bool {
+	apiCfg := model.Configs.APIKey
+	host := apiCfg.APIHost
+	return tryGetWeatherOnce(c, name, province, host, apiCfg)
+}
+
 func getWeather(c *gin.Context, name, province string) {
 	logrus.Infof("将查询 %s 省 %s 市的天气信息", province, name)
 	for i := 0; i < 5; i++ {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logrus.Errorf("获取天气信息时发生 panic: %v", r)
-				}
-			}()
-
-			// 从配置中获取 API 信息
-			apiCfg := model.Configs.APIKey
-			host := apiCfg.APIHost
-
-			// 查找城市位置
-			locationResp, err := cityLookup(name, province, host, apiCfg)
-			if err != nil {
-				if errors.Is(err, errNoQWeatherCredential) {
-					logrus.Errorf("天气认证未配置: %v", err)
-					c.JSON(http.StatusForbidden, gin.H{
-						"error": "未配置天气认证信息：请配置 JWT（kid/project_id/private_key_pem）或 apikey.weather",
-					})
-					return
-				}
-				logrus.Errorf("获取城市位置失败: %v", err)
-				c.JSON(http.StatusNotFound, gin.H{
-					"temp":       "404",
-					"weat":       "不存在",
-					"warning":    "",
-					"brief_warn": "",
-				})
-				return
-			}
-
-			// 获取天气信息
-			resp, err := weatherLookupByName(name, province, host, apiCfg)
-			if err != nil {
-				logrus.Errorf("获取天气信息失败: %v", err)
-				return
-			}
-
-			// 获取天气预警信息
-			warnResp, err := weatherWarningLookupByName(name, province, host, apiCfg)
-			if err != nil {
-				logrus.Errorf("获取天气预警信息失败: %v", err)
-				warnResp = &model.WarningResp{Alerts: []model.Alert{}}
-			}
-
-			// 处理预警信息
-			var warnParts []string
-			var briefWarnParts []string
-			for _, alert := range warnResp.Alerts {
-				warnParts = append(warnParts, strings.ReplaceAll(alert.Description, "\n", ""))
-				briefWarnParts = append(briefWarnParts, strings.ReplaceAll(alert.Headline, "\n", ""))
-			}
-
-			warn := strings.Join(warnParts, "；")
-			briefWarn := strings.Join(briefWarnParts, "；")
-
-			location := locationResp.Name
-
-			// 记录日志
-			logrus.Infof(
-				"获取 %s/%s（%s） 的天气信息，T: %s, W: %s, Warning: %s, Brief: %s, Wind: %s (%s级)",
-				province, name, location, resp.Now.Temp, resp.Now.Text, warn, briefWarn,
-				resp.Now.WindDir, resp.Now.WindScale,
-			)
-
-			// 返回响应
-			c.JSON(http.StatusOK, model.WeatherResponse{
-				Where:     location,
-				Temp:      resp.Now.Temp,
-				Weat:      resp.Now.Text,
-				Wind:      resp.Now.WindDir,
-				WindPower: resp.Now.WindScale,
-				Warn:      warn,
-				BriefWarn: briefWarn,
-			})
-		}()
-
-		// 如果响应已经写入，说明请求已处理（成功或失败），直接返回
+		if getWeatherOnce(c, name, province) {
+			return
+		}
 		if c.Writer.Written() {
 			return
 		}
 	}
 
-	// 如果所有重试都失败，返回错误响应
-
 	logrus.Errorf("获取 %s/%s 的天气信息失败，超过最大重试次数", province, name)
-
-	c.JSON(http.StatusBadGateway, gin.H{ // 502
+	c.JSON(http.StatusBadGateway, gin.H{
 		"error": "获取天气信息失败，超过最大重试次数，可能是上游服务器异常，或是本服务器存在网络波动",
 	})
 }
