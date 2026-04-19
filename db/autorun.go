@@ -7,18 +7,20 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const hashIDWhere = "hash_id = ?"
+
 func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
 	records := make([]dbTable.AutorunRecord, 0)
 	q := GetDB().Model(&dbTable.AutorunRecord{})
 	if hashid != "" {
-		q = q.Where("hash_id = ?", hashid)
+		q = q.Where(hashIDWhere, hashid)
 	}
 	err := q.Find(&records).Error
 	return records, err
 }
 
 func DeleteAutorunRecord(hashid string) (int64, error) {
-	resp := GetDB().Where("hash_id = ?", hashid).Delete(&dbTable.AutorunRecord{})
+	resp := GetDB().Where(hashIDWhere, hashid).Delete(&dbTable.AutorunRecord{})
 	return resp.RowsAffected, resp.Error
 }
 
@@ -70,7 +72,7 @@ func RefreshAutorunStatuses(today time.Time) (int64, error) {
 			continue
 		}
 		if err := GetDB().Model(&dbTable.AutorunRecord{}).
-			Where("hash_id = ?", records[i].HashID).
+			Where(hashIDWhere, records[i].HashID).
 			Update("status", newStatus).Error; err != nil {
 			return updated, err
 		}

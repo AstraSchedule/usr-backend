@@ -71,7 +71,6 @@ func ConnectDb() *gorm.DB {
 			return
 		}
 		dbInst = db
-		model.Db = dbInst
 		logrus.Info("Database connected successfully")
 	})
 	return dbInst

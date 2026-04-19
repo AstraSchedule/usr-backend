@@ -9,6 +9,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	configPathPrefix = "/config/"
+	keySchoolPrefix  = "school-"
+	keyGradeInfix    = "-grade-"
+	keyClassInfix    = "-class-"
+)
+
+func schoolKey(school string) string {
+	return keySchoolPrefix + school
+}
+
+func gradeKey(school, grade string) string {
+	return schoolKey(school) + keyGradeInfix + grade
+}
+
+func classKey(school, grade, classNumber string) string {
+	return gradeKey(school, grade) + keyClassInfix + classNumber
+}
+
+func configBasePath(school, grade string) string {
+	return configPathPrefix + school + "/" + grade
+}
+
 func GetStatistic(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"weather_error":              0,
@@ -65,7 +88,7 @@ func listClasses(school, grade string) ([]string, error) {
 }
 
 func GetMenu(c *gin.Context) {
-	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}, {"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil}}}
+	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}, {"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil}, {"to": "/tools", "text": "实用工具", "key": "tools", "children": nil}}}
 	data := menu["data"].([]gin.H)
 	schools, err := listSchools()
 	if err != nil {
@@ -77,25 +100,28 @@ func GetMenu(c *gin.Context) {
 		gradeChildren := make([]gin.H, 0)
 		for _, grade := range grades {
 			classes, _ := listClasses(school, grade)
+			gradeNodeKey := gradeKey(school, grade)
+			classConfigBasePath := configBasePath(school, grade)
 			children := []gin.H{
-				{"to": "/config/" + school + "/" + grade + "/subjects", "text": "课程设置", "key": "school-" + school + "-grade-" + grade + "-subjects", "children": nil},
-				{"to": "/config/" + school + "/" + grade + "/timetable", "text": "作息设置", "key": "school-" + school + "-grade-" + grade + "-timetable", "children": nil},
+				{"to": classConfigBasePath + "/subjects", "text": "课程设置", "key": gradeNodeKey + "-subjects", "children": nil},
+				{"to": classConfigBasePath + "/timetable", "text": "作息设置", "key": gradeNodeKey + "-timetable", "children": nil},
 			}
 			for _, classNumber := range classes {
+				classNodeKey := classKey(school, grade, classNumber)
 				children = append(children, gin.H{
 					"text": classNumber + " 班",
-					"key":  "school-" + school + "-grade-" + grade + "-class-" + classNumber,
+					"key":  classNodeKey,
 					"raw":  classNumber,
 					"children": []gin.H{
-						{"to": "/config/" + school + "/" + grade + "/" + classNumber + "/schedule", "text": "课表设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-schedule", "children": nil},
-						{"to": "/config/" + school + "/" + grade + "/" + classNumber + "/settings", "text": "通用设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-settings", "children": nil},
-						{"to": "/countdown", "text": "倒数日设置", "key": "school-" + school + "-grade-" + grade + "-class-" + classNumber + "-countdown", "children": nil},
+						{"to": classConfigBasePath + "/" + classNumber + "/schedule", "text": "课表设置", "key": classNodeKey + "-schedule", "children": nil},
+						{"to": classConfigBasePath + "/" + classNumber + "/settings", "text": "通用设置", "key": classNodeKey + "-settings", "children": nil},
+						{"to": "/countdown", "text": "倒数日设置", "key": classNodeKey + "-countdown", "children": nil},
 					},
 				})
 			}
-			gradeChildren = append(gradeChildren, gin.H{"text": grade + " 级", "key": "school-" + school + "-grade-" + grade, "raw": grade, "children": children})
+			gradeChildren = append(gradeChildren, gin.H{"text": grade + " 级", "key": gradeNodeKey, "raw": grade, "children": children})
 		}
-		data = append(data, gin.H{"text": school + " 学校", "key": "school-" + school, "raw": school, "children": gradeChildren})
+		data = append(data, gin.H{"text": school + " 学校", "key": schoolKey(school), "raw": school, "children": gradeChildren})
 	}
 	menu["data"] = data
 	c.JSON(http.StatusOK, menu)

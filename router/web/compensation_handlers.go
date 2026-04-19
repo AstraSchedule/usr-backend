@@ -12,18 +12,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	dateFormat      = "2006-01-02"
+	invalidDateErr = "日期参数格式错误"
+)
+
 func CompensationFromHoliday(c *gin.Context) {
 	year, err1 := strconv.Atoi(c.Param("year"))
 	month, err2 := strconv.Atoi(c.Param("month"))
 	day, err3 := strconv.Atoi(c.Param("day"))
 	if err1 != nil || err2 != nil || err3 != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
 		return
 	}
 
 	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+	if _, err := time.Parse(dateFormat, dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
 		return
 	}
 
@@ -46,13 +51,13 @@ func CompensationFromWorkday(c *gin.Context) {
 	month, err2 := strconv.Atoi(c.Param("month"))
 	day, err3 := strconv.Atoi(c.Param("day"))
 	if err1 != nil || err2 != nil || err3 != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
 		return
 	}
 
 	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
-	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "日期参数格式错误"})
+	if _, err := time.Parse(dateFormat, dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
 		return
 	}
 
@@ -97,7 +102,7 @@ func CompensationFromYear(c *gin.Context) {
 func GetScheduleByDate(c *gin.Context) {
 	dateStr := c.Query("date")
 	scope := c.Query("scope")
-	dateObj, err := time.Parse("2006-01-02", dateStr)
+	dateObj, err := time.Parse(dateFormat, dateStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的日期格式，应为 YYYY-MM-DD"})
 		return
