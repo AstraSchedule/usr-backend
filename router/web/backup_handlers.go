@@ -95,7 +95,7 @@ func parseBackupPayload(c *gin.Context) (*db.BackupPayload, error) {
 	}
 
 	payload := &db.BackupPayload{}
-	if bindErr := c.ShouldBindJSON(payload); bindErr != nil {
+	if err := c.ShouldBindJSON(payload); err != nil {
 		return nil, errors.New("请通过 multipart/form-data 上传字段 file，或直接提交 JSON 请求体")
 	}
 	return payload, nil

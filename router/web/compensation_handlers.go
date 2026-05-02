@@ -17,27 +17,35 @@ const (
 	invalidDateErr = "日期参数格式错误"
 )
 
-func CompensationFromHoliday(c *gin.Context) {
+// parseDateFromParams 从 URL 参数中提取并校验年月日，返回格式化后的日期字符串
+func parseDateFromParams(c *gin.Context) (string, bool) {
 	year, err1 := strconv.Atoi(c.Param("year"))
 	month, err2 := strconv.Atoi(c.Param("month"))
 	day, err3 := strconv.Atoi(c.Param("day"))
 	if err1 != nil || err2 != nil || err3 != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
-		return
+		return "", false
 	}
 
 	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
 	if _, err := time.Parse(dateFormat, dateStr); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
+		return "", false
+	}
+
+	return dateStr, true
+}
+
+func compensationFromQuery(c *gin.Context, queryFn func(string) (string, bool)) {
+	dateStr, ok := parseDateFromParams(c)
+	if !ok {
 		return
 	}
 
-	workday, exists := valence.CompensationFromHoliday(dateStr)
-	var compensation interface{}
+	result, exists := queryFn(dateStr)
+	var compensation any
 	if exists {
-		compensation = workday
-	} else {
-		compensation = nil
+		compensation = result
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -46,33 +54,12 @@ func CompensationFromHoliday(c *gin.Context) {
 	})
 }
 
+func CompensationFromHoliday(c *gin.Context) {
+	compensationFromQuery(c, valence.CompensationFromHoliday)
+}
+
 func CompensationFromWorkday(c *gin.Context) {
-	year, err1 := strconv.Atoi(c.Param("year"))
-	month, err2 := strconv.Atoi(c.Param("month"))
-	day, err3 := strconv.Atoi(c.Param("day"))
-	if err1 != nil || err2 != nil || err3 != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
-		return
-	}
-
-	dateStr := fmt.Sprintf("%04d-%02d-%02d", year, month, day)
-	if _, err := time.Parse(dateFormat, dateStr); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": invalidDateErr})
-		return
-	}
-
-	holiday, exists := valence.CompensationFromWorkday(dateStr)
-	var compensation interface{}
-	if exists {
-		compensation = holiday
-	} else {
-		compensation = nil
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"date":         dateStr,
-		"compensation": compensation,
-	})
+	compensationFromQuery(c, valence.CompensationFromWorkday)
 }
 
 func CompensationFromYear(c *gin.Context) {

@@ -2,6 +2,7 @@ package db
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
+	"reflect"
 	"time"
 
 	"gorm.io/gorm"
@@ -33,6 +34,33 @@ const (
 	orderByIDAsc        = "id ASC"
 	orderByCreatedAtAsc = "created_at ASC"
 )
+
+// resetIDsToZero 将切片中所有元素的 ID 字段重置为 0，让数据库自动分配新 ID
+func resetIDsToZero(slice any) {
+	v := reflect.ValueOf(slice)
+	if v.Kind() != reflect.Slice {
+		return
+	}
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i)
+		if elem.Kind() == reflect.Ptr {
+			elem = elem.Elem()
+		}
+		if elem.Kind() != reflect.Struct {
+			continue
+		}
+		idField := elem.FieldByName("ID")
+		if !idField.IsValid() || !idField.CanSet() {
+			continue
+		}
+		switch idField.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			idField.SetInt(0)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			idField.SetUint(0)
+		}
+	}
+}
 
 func ExportBackup() (*BackupPayload, error) {
 	dbConn := GetDB()
@@ -116,96 +144,68 @@ func ImportBackup(payload *BackupPayload) (*BackupImportResult, error) {
 	return result, nil
 }
 
-func importSchedules(tx *gorm.DB, rows []dbTable.Schedule) (int, error) {
+// onConflictSpec 定义导入数据时的 OnConflict 配置
+type onConflictSpec struct {
+	columns    []clause.Column
+	updateCols []string
+}
+
+// importRows 通用的批量导入函数，重置 ID 后通过 OnConflict 进行 upsert
+func importRows[T any](tx *gorm.DB, rows []T, spec onConflictSpec) (int, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	for i := range rows {
-		rows[i].ID = 0
-	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
-		DoUpdates: clause.AssignmentColumns([]string{"daily_classes"}),
-	}).Create(&rows).Error
-	if err != nil {
+	// 使用 reflect 将所有行的 ID 字段重置为 0，让数据库自动分配新 ID
+	resetIDsToZero(rows)
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   spec.columns,
+		DoUpdates: clause.AssignmentColumns(spec.updateCols),
+	}).Create(&rows).Error; err != nil {
 		return 0, err
 	}
 	return len(rows), nil
 }
 
+func importSchedules(tx *gorm.DB, rows []dbTable.Schedule) (int, error) {
+	return importRows(tx, rows, onConflictSpec{
+		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		updateCols: []string{"daily_classes"},
+	})
+}
+
 func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	for i := range rows {
-		rows[i].ID = 0
-	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
-		DoUpdates: clause.AssignmentColumns([]string{
+	return importRows(tx, rows, onConflictSpec{
+		columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		updateCols: []string{
 			"countdown_target",
 			"weather_alert_override",
 			"weather_alert_brief",
 			"week_display",
 			"banner_text",
 			"css_style",
-		}),
-	}).Create(&rows).Error
-	if err != nil {
-		return 0, err
-	}
-	return len(rows), nil
+		},
+	})
 }
 
 func importTimetables(tx *gorm.DB, rows []dbTable.Timetable) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	for i := range rows {
-		rows[i].ID = 0
-	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
-		DoUpdates: clause.AssignmentColumns([]string{"timetable", "divider", "start_date"}),
-	}).Create(&rows).Error
-	if err != nil {
-		return 0, err
-	}
-	return len(rows), nil
+	return importRows(tx, rows, onConflictSpec{
+		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
+		updateCols: []string{"timetable", "divider", "start_date"},
+	})
 }
 
 func importSubjects(tx *gorm.DB, rows []dbTable.Subject) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	for i := range rows {
-		rows[i].ID = 0
-	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
-		DoUpdates: clause.AssignmentColumns([]string{"subject_name"}),
-	}).Create(&rows).Error
-	if err != nil {
-		return 0, err
-	}
-	return len(rows), nil
+	return importRows(tx, rows, onConflictSpec{
+		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
+		updateCols: []string{"subject_name"},
+	})
 }
 
 func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	for i := range rows {
-		rows[i].ID = 0
-	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
-		DoUpdates: clause.AssignmentColumns([]string{"version"}),
-	}).Create(&rows).Error
-	if err != nil {
-		return 0, err
-	}
-	return len(rows), nil
+	return importRows(tx, rows, onConflictSpec{
+		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		updateCols: []string{"version"},
+	})
 }
 
 func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord) (int, error) {
