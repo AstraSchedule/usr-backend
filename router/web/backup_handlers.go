@@ -52,7 +52,7 @@ func ImportBackup(c *gin.Context) {
 		return
 	}
 
-	result, err := db.ImportBackup(payload)
+	result, err := db.ImportBackup(payload, "overwrite")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -99,4 +99,62 @@ func parseBackupPayload(c *gin.Context) (*db.BackupPayload, error) {
 		return nil, errors.New("请通过 multipart/form-data 上传字段 file，或直接提交 JSON 请求体")
 	}
 	return payload, nil
+}
+
+// FullExportBackup 完整备份导出（使用 BasicAuth 验证）
+func FullExportBackup(c *gin.Context) {
+	payload, err := db.ExportBackup()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	content, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	filename := "astra-full-backup-" + time.Now().Format("20060102-150405") + ".json"
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Data(http.StatusOK, "application/json", content)
+}
+
+// FullImportBackup 完整备份导入（使用 BasicAuth 验证，支持 overwrite/skip 模式）
+func FullImportBackup(c *gin.Context) {
+	if c.Request.ContentLength > maxBackupImportSize {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "上传文件过大（限制 50MB）"})
+		return
+	}
+
+	// 获取 mode 参数，默认 overwrite
+	mode := c.DefaultPostForm("mode", "overwrite")
+	if mode != "overwrite" && mode != "skip" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的 mode 参数，仅支持 overwrite 或 skip"})
+		return
+	}
+
+	payload, err := parseBackupPayload(c)
+	if err != nil {
+		if errors.Is(err, gorm.ErrInvalidData) {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "备份文件内容无效"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	result, err := db.ImportBackup(payload, mode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  200,
+		"message": "备份导入完成",
+		"mode":    mode,
+		"data":    result,
+	})
 }

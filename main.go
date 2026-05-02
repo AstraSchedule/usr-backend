@@ -64,6 +64,9 @@ func main() {
 	router.GET("/web/structure", web.GetStructure)
 	authorized.GET("/web/backup/export", web.ExportBackup)
 	authorized.POST("/web/backup/import", web.ImportBackup)
+	// 完整备份导出/导入（支持 overwrite/skip 模式）
+	authorized.POST("/web/backup/full-export", web.FullExportBackup)
+	authorized.POST("/web/backup/full-import", web.FullImportBackup)
 
 	// 配置接口
 	router.GET("/web/config/:school/:grade/subjects/options", web.GetSubjectsOptions)
