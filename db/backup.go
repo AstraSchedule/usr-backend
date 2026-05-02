@@ -96,9 +96,14 @@ func ExportBackup() (*BackupPayload, error) {
 	return payload, nil
 }
 
-func ImportBackup(payload *BackupPayload) (*BackupImportResult, error) {
+func ImportBackup(payload *BackupPayload, mode string) (*BackupImportResult, error) {
 	if payload == nil {
 		return nil, gorm.ErrInvalidData
+	}
+
+	// 默认 overwrite 模式
+	if mode == "" {
+		mode = "overwrite"
 	}
 
 	tx := GetDB().Begin()
@@ -119,13 +124,13 @@ func ImportBackup(payload *BackupPayload) (*BackupImportResult, error) {
 	}
 
 	steps := []importStep{
-		{name: "schedules", run: func(tx *gorm.DB) (int, error) { return importSchedules(tx, payload.Schedules) }},
-		{name: "client_configs", run: func(tx *gorm.DB) (int, error) { return importClientConfigs(tx, payload.ClientConfigs) }},
-		{name: "timetables", run: func(tx *gorm.DB) (int, error) { return importTimetables(tx, payload.Timetables) }},
-		{name: "subjects", run: func(tx *gorm.DB) (int, error) { return importSubjects(tx, payload.Subjects) }},
-		{name: "data_versions", run: func(tx *gorm.DB) (int, error) { return importDataVersions(tx, payload.DataVersions) }},
-		{name: "autorun_records", run: func(tx *gorm.DB) (int, error) { return importAutorunRecords(tx, payload.AutorunRecords) }},
-		{name: "countdown_records", run: func(tx *gorm.DB) (int, error) { return importCountdownRecords(tx, payload.CountdownRecord) }},
+		{name: "schedules", run: func(tx *gorm.DB) (int, error) { return importSchedules(tx, payload.Schedules, mode) }},
+		{name: "client_configs", run: func(tx *gorm.DB) (int, error) { return importClientConfigs(tx, payload.ClientConfigs, mode) }},
+		{name: "timetables", run: func(tx *gorm.DB) (int, error) { return importTimetables(tx, payload.Timetables, mode) }},
+		{name: "subjects", run: func(tx *gorm.DB) (int, error) { return importSubjects(tx, payload.Subjects, mode) }},
+		{name: "data_versions", run: func(tx *gorm.DB) (int, error) { return importDataVersions(tx, payload.DataVersions, mode) }},
+		{name: "autorun_records", run: func(tx *gorm.DB) (int, error) { return importAutorunRecords(tx, payload.AutorunRecords, mode) }},
+		{name: "countdown_records", run: func(tx *gorm.DB) (int, error) { return importCountdownRecords(tx, payload.CountdownRecord, mode) }},
 	}
 
 	for _, step := range steps {
@@ -148,6 +153,7 @@ func ImportBackup(payload *BackupPayload) (*BackupImportResult, error) {
 type onConflictSpec struct {
 	columns    []clause.Column
 	updateCols []string
+	mode       string // "overwrite" 或 "skip"，默认 "overwrite"
 }
 
 // importRows 通用的批量导入函数，重置 ID 后通过 OnConflict 进行 upsert
@@ -157,23 +163,37 @@ func importRows[T any](tx *gorm.DB, rows []T, spec onConflictSpec) (int, error) 
 	}
 	// 使用 reflect 将所有行的 ID 字段重置为 0，让数据库自动分配新 ID
 	resetIDsToZero(rows)
-	if err := tx.Clauses(clause.OnConflict{
-		Columns:   spec.columns,
-		DoUpdates: clause.AssignmentColumns(spec.updateCols),
-	}).Create(&rows).Error; err != nil {
+
+	// 根据 mode 构建 OnConflict 子句
+	var onConflict clause.OnConflict
+	if spec.mode == "skip" {
+		onConflict = clause.OnConflict{
+			Columns:   spec.columns,
+			DoNothing: true,
+		}
+	} else {
+		// 默认 overwrite 模式
+		onConflict = clause.OnConflict{
+			Columns:   spec.columns,
+			DoUpdates: clause.AssignmentColumns(spec.updateCols),
+		}
+	}
+
+	if err := tx.Clauses(onConflict).Create(&rows).Error; err != nil {
 		return 0, err
 	}
 	return len(rows), nil
 }
 
-func importSchedules(tx *gorm.DB, rows []dbTable.Schedule) (int, error) {
+func importSchedules(tx *gorm.DB, rows []dbTable.Schedule, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{"daily_classes"},
+		mode:       mode,
 	})
 }
 
-func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig) (int, error) {
+func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{
@@ -184,65 +204,91 @@ func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig) (int, error) 
 			"banner_text",
 			"css_style",
 		},
+		mode: mode,
 	})
 }
 
-func importTimetables(tx *gorm.DB, rows []dbTable.Timetable) (int, error) {
+func importTimetables(tx *gorm.DB, rows []dbTable.Timetable, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
 		updateCols: []string{"timetable", "divider", "start_date"},
+		mode:       mode,
 	})
 }
 
-func importSubjects(tx *gorm.DB, rows []dbTable.Subject) (int, error) {
+func importSubjects(tx *gorm.DB, rows []dbTable.Subject, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
 		updateCols: []string{"subject_name"},
+		mode:       mode,
 	})
 }
 
-func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion) (int, error) {
+func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{"version"},
+		mode:       mode,
 	})
 }
 
-func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord) (int, error) {
+func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string) (int, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "hash_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"e_type",
-			"scope",
-			"parameters",
-			"level",
-			"status",
-			"created_at",
-			"updated_at",
-		}),
-	}).Create(&rows).Error
+
+	var onConflict clause.OnConflict
+	if mode == "skip" {
+		onConflict = clause.OnConflict{
+			Columns:   []clause.Column{{Name: "hash_id"}},
+			DoNothing: true,
+		}
+	} else {
+		onConflict = clause.OnConflict{
+			Columns: []clause.Column{{Name: "hash_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"e_type",
+				"scope",
+				"parameters",
+				"level",
+				"status",
+				"created_at",
+				"updated_at",
+			}),
+		}
+	}
+
+	err := tx.Clauses(onConflict).Create(&rows).Error
 	if err != nil {
 		return 0, err
 	}
 	return len(rows), nil
 }
 
-func importCountdownRecords(tx *gorm.DB, rows []dbTable.CountdownRecord) (int, error) {
+func importCountdownRecords(tx *gorm.DB, rows []dbTable.CountdownRecord, mode string) (int, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"scope",
-			"schedules",
-			"created_at",
-			"updated_at",
-		}),
-	}).Create(&rows).Error
+
+	var onConflict clause.OnConflict
+	if mode == "skip" {
+		onConflict = clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoNothing: true,
+		}
+	} else {
+		onConflict = clause.OnConflict{
+			Columns: []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"scope",
+				"schedules",
+				"created_at",
+				"updated_at",
+			}),
+		}
+	}
+
+	err := tx.Clauses(onConflict).Create(&rows).Error
 	if err != nil {
 		return 0, err
 	}
