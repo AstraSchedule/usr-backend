@@ -1,12 +1,23 @@
 package dbTable
 
+type TemperatureStop struct {
+	Temp  float64 `json:"temp"`
+	Color string  `json:"color"`
+}
+
+type TemperatureColorsConfig struct {
+	UseGradient bool              `json:"use_gradient"`
+	Stops       []TemperatureStop `json:"stops"`
+}
+
 type ClientConfigItems struct {
-	CountdownTarget      string            `json:"countdown_target"`
-	WeatherAlertOverride bool              `json:"weather_alert_override"`
-	WeatherAlertBrief    bool              `json:"weather_alert_brief"`
-	WeekDisplay          bool              `json:"week_display"`
-	BannerText           string            `json:"banner_text"`
-	CSSStyle             map[string]string `json:"css_style" gorm:"type:json;not null;serializer:json"`
+	CountdownTarget      string                   `json:"countdown_target"`
+	WeatherAlertOverride bool                     `json:"weather_alert_override"`
+	WeatherAlertBrief    bool                     `json:"weather_alert_brief"`
+	WeekDisplay          bool                     `json:"week_display"`
+	BannerText           string                   `json:"banner_text"`
+	CSSStyle             map[string]string        `json:"css_style" gorm:"type:json;not null;serializer:json"`
+	TemperatureColors    TemperatureColorsConfig  `json:"temperature_colors" gorm:"type:json;serializer:json"`
 }
 
 type ClientConfig struct {

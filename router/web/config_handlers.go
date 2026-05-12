@@ -3,6 +3,7 @@ package web
 import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/service"
 	"errors"
 	"net/http"
@@ -323,6 +324,7 @@ func CopyConfig(c *gin.Context) {
 			WeekDisplay:          srcSettings.WeekDisplay,
 			BannerText:           srcSettings.BannerText,
 			CSSStyle:             cloneStringMap(srcSettings.CSSStyle),
+			TemperatureColors:   srcSettings.TemperatureColors,
 		},
 	}
 
@@ -363,6 +365,7 @@ func CopyConfig(c *gin.Context) {
 		return
 	}
 
+	client.BroadcastSyncConfig(c)
 	c.JSON(http.StatusOK, gin.H{
 		"status": 200,
 		"from": gin.H{
@@ -500,5 +503,6 @@ func PutSettings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	client.BroadcastSyncConfig(c)
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
