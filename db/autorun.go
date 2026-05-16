@@ -45,7 +45,7 @@ func deriveStatusForRecord(etype int, parameters map[string]interface{}, today t
 	if dateStr == "" {
 		return 0
 	}
-	day, err := time.Parse("2006-01-02", dateStr)
+	day, err := time.ParseInLocation("2006-01-02", dateStr, today.Location())
 	if err != nil {
 		return 0
 	}
