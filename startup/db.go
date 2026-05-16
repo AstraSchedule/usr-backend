@@ -12,6 +12,9 @@ import (
 )
 
 func shouldSkipAutoMigrate() bool {
+	if model.Configs.Db.Type == "sqlite" {
+		return false // SQLite 由于无法从外网访问进行初始化，而且 AutoMigrate 足够快，所以总是执行
+	}
 	raw := strings.TrimSpace(os.Getenv("GIN_MODE"))
 	if raw == "" {
 		return false
