@@ -2,6 +2,7 @@ package startup
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"os"
 	"strconv"
@@ -32,6 +33,12 @@ func MigrateDb() {
 	}
 
 	logrus.Info("开始执行 AutoMigrate")
+
+	// SQLite: Clean up orphan indexes from previous failed migrations
+	if strings.EqualFold(model.Configs.Db.Type, "sqlite") {
+		db.GetDB().Exec("DROP INDEX IF EXISTS idx_unique_school_grade_class")
+		db.GetDB().Exec("DROP INDEX IF EXISTS idx_unique_school_grade")
+	}
 
 	err := db.GetDB().AutoMigrate(
 		&dbTable.Schedule{},
