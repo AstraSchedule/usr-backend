@@ -3,6 +3,7 @@ package web
 import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/service"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
@@ -13,50 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-func scopeMatchesClass(scope, classID string) bool {
-	if scope == "" || scope == "ALL" {
-		return true
-	}
-	sParts := strings.Split(scope, "/")
-	cParts := strings.Split(classID, "/")
-	if len(cParts) < 3 {
-		return false
-	}
-	school, grade, classNumber := cParts[0], cParts[1], cParts[2]
-	switch len(sParts) {
-	case 1:
-		return sParts[0] == school
-	case 2:
-		return sParts[0] == school && sParts[1] == grade
-	default:
-		return sParts[0] == school && sParts[1] == grade && sParts[2] == classNumber
-	}
-}
-
-func filterCountdownByScope(records []dbTable.CountdownRecord, classID string) []dbTable.CountdownRecord {
-	if classID == "" {
-		return records
-	}
-	out := make([]dbTable.CountdownRecord, 0, len(records))
-	for _, rec := range records {
-		scopes := rec.Scope
-		if len(scopes) == 0 {
-			scopes = []string{"ALL"}
-		}
-		matched := false
-		for _, scope := range scopes {
-			if scopeMatchesClass(scope, classID) {
-				matched = true
-				break
-			}
-		}
-		if matched {
-			out = append(out, rec)
-		}
-	}
-	return out
-}
 
 func normalizeCountdownSchedules(items []countdownScheduleInput) []dbTable.CountdownScheduleItem {
 	out := make([]dbTable.CountdownScheduleItem, 0, len(items))
@@ -119,7 +76,7 @@ func GetCountdownStatus(c *gin.Context) {
 		return
 	}
 
-	rows = filterCountdownByScope(rows, scope)
+	rows = service.FilterCountdownByScope(rows, scope)
 	out := make([]gin.H, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, mapCountdownRecord(r))

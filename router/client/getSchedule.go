@@ -51,6 +51,12 @@ func GetSchedule(c *gin.Context) {
 		class,
 		time.Now(),
 	)
+
+	// 获取并过滤倒数日记录
+	classID := school + "/" + grade + "/" + class
+	allCountdowns, _ := db.FetchCountdownRecords("")
+	filteredCountdowns := service.FilterCountdownByScope(allCountdowns, classID)
+
 	fullResponse := model.FullResponseConfig{
 		SupportWebsocket:  model.Configs.WebSocketEnabled(),
 		Version:           strconv.FormatInt(serverDataVersion.Timestamp(), 10),
@@ -58,6 +64,7 @@ func GetSchedule(c *gin.Context) {
 		ClientConfigItems: clientConfig.ClientConfigItems,
 		TimetableConfig:   timetable.TimetableConfig,
 		SubjectConfig:     subject.SubjectConfig,
+		CountdownRecords:  filteredCountdowns,
 	}
 	c.JSON(http.StatusOK, fullResponse)
 }

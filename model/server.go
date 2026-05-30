@@ -16,4 +16,5 @@ type FullResponseConfig struct {
 	dbTable.ClientConfigItems
 	dbTable.TimetableConfig
 	dbTable.SubjectConfig
+	CountdownRecords []dbTable.CountdownRecord `json:"countdown_records,omitempty"`
 }
