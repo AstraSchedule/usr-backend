@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	gormsqlite "github.com/libtnb/sqlite"
 	"github.com/sirupsen/logrus"
 	gormmysql "gorm.io/driver/mysql"
-	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -40,8 +40,9 @@ func ConnectDb() *gorm.DB {
 				}
 			}
 			logrus.Infof("Connecting to SQLite database: %s", model.Configs.Db.Path)
-			dialector = gormsqlite.Open(model.Configs.Db.Path)
+			dialector = gormsqlite.Open(fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_busy_timeout=5000", model.Configs.Db.Path))
 		default:
+
 			cfg := mysql.NewConfig()
 			cfg.User = model.Configs.Db.User
 			cfg.Passwd = model.Configs.Db.Pass

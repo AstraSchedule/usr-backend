@@ -10,7 +10,6 @@ import (
 
 	"github.com/dromara/carbon/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
 
 func GetSchedule(c *gin.Context) {
@@ -29,9 +28,7 @@ func GetSchedule(c *gin.Context) {
 		}
 		clientDataVersion = carbon.CreateFromTimestamp(cDVInt)
 	}
-	logrus.Infof("school: %s, grade: %s, class: %s, version: %s", school, grade, class, version)
 	serverDataVersion := db.GetLatestVersion(school, grade, class)
-	logrus.Infof("serverDataVersion: %s", serverDataVersion)
 	if clientDataVersion.Eq(serverDataVersion) {
 		c.Status(http.StatusNotModified) // 304
 		return

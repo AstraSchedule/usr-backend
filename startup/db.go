@@ -2,6 +2,7 @@ package startup
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"os"
 	"strconv"
@@ -11,6 +12,9 @@ import (
 )
 
 func shouldSkipAutoMigrate() bool {
+	if model.Configs.Db.Type == "sqlite" {
+		return false // SQLite 由于无法从外网访问进行初始化，而且 AutoMigrate 足够快，所以总是执行
+	}
 	raw := strings.TrimSpace(os.Getenv("GIN_MODE"))
 	if raw == "" {
 		return false
@@ -32,6 +36,12 @@ func MigrateDb() {
 	}
 
 	logrus.Info("开始执行 AutoMigrate")
+
+	// SQLite: Clean up orphan indexes from previous failed migrations
+	if strings.EqualFold(model.Configs.Db.Type, "sqlite") {
+		db.GetDB().Exec("DROP INDEX IF EXISTS idx_unique_school_grade_class")
+		db.GetDB().Exec("DROP INDEX IF EXISTS idx_unique_school_grade")
+	}
 
 	err := db.GetDB().AutoMigrate(
 		&dbTable.Schedule{},

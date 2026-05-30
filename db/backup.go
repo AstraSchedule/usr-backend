@@ -227,7 +227,7 @@ func importSubjects(tx *gorm.DB, rows []dbTable.Subject, mode string) (int, erro
 func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
 		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
-		updateCols: []string{"version"},
+		updateCols: []string{"version", "updated_at"},
 		mode:       mode,
 	})
 }
