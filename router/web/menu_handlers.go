@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
 	"sort"
@@ -39,6 +40,7 @@ func GetStatistic(c *gin.Context) {
 		"websocket_disconnect_count": 0,
 		"clients":                    []string{},
 		"clients_count":              0,
+		"serverless":                 model.Configs.Run.Serverless,
 	})
 }
 
