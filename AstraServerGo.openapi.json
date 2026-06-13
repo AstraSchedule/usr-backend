@@ -1,0 +1,2535 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "AstraServerGo",
+    "description": "基于 `AstraScheduleServerGo` 源码生成的 OpenAPI 3.0 文档。\n\n- 共 41 个 API 端点，覆盖客户端课表、天气、WebSocket、管理后台配置、自动任务、倒数日、备份导入导出等功能。\n- 受 Gin BasicAuth 保护的接口使用 `basicAuth` 安全方案（用户名：`AstraSchedule` 或 `ElectronClassSchedule`）。\n- 部分接口返回结构是动态 JSON（`map[string]interface{}`），已尽量按实际行为建模。\n",
+    "version": "1.1.0"
+  },
+  "tags": [
+    { "name": "health", "description": "健康检查" },
+    { "name": "client", "description": "客户端接口（课表获取/更新）" },
+    { "name": "weather", "description": "天气查询" },
+    { "name": "websocket", "description": "WebSocket 连接与广播" },
+    { "name": "web-menu", "description": "管理后台：统计、菜单、结构" },
+    { "name": "web-backup", "description": "管理后台：备份导出/导入" },
+    { "name": "web-config", "description": "管理后台：配置管理（科目、作息、课表、设置、复制）" },
+    { "name": "web-autorun", "description": "管理后台：自动任务与调休查询" },
+    { "name": "web-schedule", "description": "管理后台：按日期查询课节" },
+    { "name": "web-countdown", "description": "管理后台：倒数日配置" }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Hello World",
+        "operationId": "getRootHello",
+        "tags": ["health"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "服务可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Hello World" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/{school}/{grade}/{class}": {
+      "get": {
+        "summary": "获取完整课表配置",
+        "description": "客户端通过 school/grade/class 获取完整配置（课表、作息、科目、通用设置、版本）。可选 `version` 参数实现增量更新（304 Not Modified）。",
+        "operationId": "getFullSchedule",
+        "tags": ["client"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }, "example": "default"
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }, "example": "2024级"
+          },
+          {
+            "name": "class", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }, "example": "1班"
+          },
+          {
+            "name": "version", "in": "query", "description": "客户端数据版本（Unix 时间戳秒）。若与服务端一致则返回 304。",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回完整配置",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FullResponseConfig" }
+              }
+            }
+          },
+          "304": { "description": "客户端版本与服务端一致，无需更新" },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "完整更新课表配置",
+        "description": "通过 BasicAuth 认证后，上传完整的班级配置（课表、作息、科目、通用设置），服务端会连带更新版本号。",
+        "operationId": "putFullSchedule",
+        "tags": ["client"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }, "example": "default"
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }, "example": "2024级"
+          },
+          {
+            "name": "class", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }, "example": "1班"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FullClientConfig" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["message", "version"],
+                  "properties": {
+                    "message": { "type": "string", "example": "课表更新成功" },
+                    "version": { "type": "string", "description": "服务端版本（Unix 时间戳秒）" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/api/weather/{name1}/{name2}": {
+      "get": {
+        "summary": "按省份/城市查询天气",
+        "description": "带 10 分钟内存缓存。",
+        "operationId": "getWeatherWithProvince",
+        "tags": ["weather"],
+        "parameters": [
+          {
+            "name": "name1", "in": "path", "description": "省份名", "required": true,
+            "schema": { "type": "string" }, "example": "北京"
+          },
+          {
+            "name": "name2", "in": "path", "description": "城市名", "required": true,
+            "schema": { "type": "string" }, "example": "北京"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "城市不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "天气 API 调用失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/weather/{name1}": {
+      "get": {
+        "summary": "按城市查询天气",
+        "description": "带 10 分钟内存缓存。",
+        "operationId": "getWeatherWithCity",
+        "tags": ["weather"],
+        "parameters": [
+          {
+            "name": "name1", "in": "path", "description": "城市名", "required": true,
+            "schema": { "type": "string" }, "example": "北京"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "城市不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "天气 API 调用失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/weather/": {
+      "get": {
+        "summary": "通过 Cloudflare 请求头查询天气",
+        "description": "通过 CF-IPCity / CF-Region 请求头自动定位查询天气。",
+        "operationId": "getWeatherWithCFHeader",
+        "tags": ["weather"],
+        "parameters": [
+          {
+            "name": "CF-IPCity", "in": "header", "description": "Cloudflare 城市头；缺失时返回 400",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "CF-Region", "in": "header", "description": "Cloudflare 省份头",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "缺少 CF 头",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "404": {
+            "description": "城市不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "天气 API 调用失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/ws/{school}/{grade}/{class_number}": {
+      "get": {
+        "summary": "建立 WebSocket 连接",
+        "description": "客户端通过 WebSocket 升级连接，服务端将连接注册到对应级部的广播组。实际使用 `router.Any`，这里按常见的 GET 升级握手记录。当 `run.serverless=true` 时返回 501。",
+        "operationId": "websocketConnect",
+        "tags": ["websocket"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "101": { "description": "协议升级成功（WebSocket）" },
+          "400": {
+            "description": "WebSocket 升级失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "501": {
+            "description": "WebSocket 功能已禁用（serverless 模式）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/broadcast/{school}/{grade}/{class_number}": {
+      "post": {
+        "summary": "广播同步消息（SyncConfig）",
+        "description": "向指定级部所有已连接的 WebSocket 客户端发送 SyncConfig 消息，通知客户端拉取最新配置。无需请求体。",
+        "operationId": "broadcastSyncConfig",
+        "tags": ["websocket"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "广播结果",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BroadcastResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/statistic": {
+      "get": {
+        "summary": "获取统计信息",
+        "description": "返回天气错误次数、WebSocket 断开统计、当前连接客户端列表等。",
+        "operationId": "getStatistic",
+        "tags": ["web-menu"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "统计信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatisticResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/menu": {
+      "get": {
+        "summary": "获取管理端菜单",
+        "operationId": "getMenu",
+        "tags": ["web-menu"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "菜单树",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/MenuNode" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/structure": {
+      "get": {
+        "summary": "获取学校-年级-班级结构",
+        "operationId": "getStructure",
+        "tags": ["web-menu"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "结构树",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/StructureNode" }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/backup/export": {
+      "get": {
+        "summary": "导出完整备份",
+        "description": "导出数据库中所有配置数据（课表、作息、科目、设置、版本、自动任务、倒数日）为 JSON 文件下载。需要 BasicAuth 认证。",
+        "operationId": "exportBackup",
+        "tags": ["web-backup"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON 备份文件下载（Content-Disposition: attachment）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackupPayload" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "导出失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/backup/import": {
+      "post": {
+        "summary": "导入备份",
+        "description": "导入备份 JSON 文件。支持两种方式：\n1. multipart/form-data 上传 `file` 字段（.json 文件，最大 50MB）\n2. 直接发送 JSON 请求体\n导入模式为 overwrite（覆盖已存在的记录）。需要 BasicAuth 认证。",
+        "operationId": "importBackup",
+        "tags": ["web-backup"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "备份 JSON 文件（.json，最大 50MB）"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BackupPayload" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "导入成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "message", "data"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "message": { "type": "string", "example": "备份导入完成" },
+                    "data": { "$ref": "#/components/schemas/BackupImportResult" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "导入失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/backup/full-export": {
+      "post": {
+        "summary": "完整备份导出",
+        "description": "与 `GET /web/backup/export` 功能相同，导出全量数据为 JSON 文件下载。使用 POST 方法以支持更灵活的参数扩展。需要 BasicAuth 认证。",
+        "operationId": "fullExportBackup",
+        "tags": ["web-backup"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON 备份文件下载",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackupPayload" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "导出失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/backup/full-import": {
+      "post": {
+        "summary": "完整备份导入（支持 overwrite/skip 模式）",
+        "description": "与 `POST /web/backup/import` 类似，但支持通过 `mode` 参数控制导入策略：\n- `overwrite`（默认）：覆盖已存在的记录\n- `skip`：跳过已存在的记录\n支持 multipart/form-data 上传或直接 JSON 请求体。需要 BasicAuth 认证。",
+        "operationId": "fullImportBackup",
+        "tags": ["web-backup"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "备份 JSON 文件（.json，最大 50MB）"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["overwrite", "skip"],
+                    "default": "overwrite",
+                    "description": "导入模式：overwrite=覆盖，skip=跳过已存在"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BackupPayload" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "导入成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "message", "mode", "data"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "message": { "type": "string", "example": "备份导入完成" },
+                    "mode": { "type": "string", "enum": ["overwrite", "skip"] },
+                    "data": { "$ref": "#/components/schemas/BackupImportResult" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "导入失败",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/config/{school}/{grade}/subjects/options": {
+      "get": {
+        "summary": "获取科目下拉选项",
+        "operationId": "getSubjectsOptions",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "科目选项列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["options"],
+                  "properties": {
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": { "type": "string", "description": "显示文本，如「语文（Chinese）」" },
+                          "value": { "type": "string", "description": "选项值，如「语文」" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/config/{school}/{grade}/subjects": {
+      "get": {
+        "summary": "获取科目配置",
+        "description": "返回该学校/年级的科目简称与全称映射。",
+        "operationId": "getSubjects",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "科目简称与全称",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SubjectsPayload" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "更新科目配置",
+        "description": "支持两种请求体格式：带 `model` 包装（NaiveUI 管理后台格式）或直接传 `abbr`/`fullName`。需要 BasicAuth 认证。",
+        "operationId": "putSubjects",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/SubjectsPayload" },
+                  {
+                    "type": "object",
+                    "required": ["model"],
+                    "properties": {
+                      "model": { "$ref": "#/components/schemas/SubjectsPayload" }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200" }
+              }
+            }
+          },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/config/{school}/{grade}/timetable/options": {
+      "get": {
+        "summary": "获取作息表选项",
+        "description": "返回可用的作息表名称列表，每项含 label、value 和该作息所需的课节数（need）。",
+        "operationId": "getTimetableOptions",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "作息选项",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["options"],
+                  "properties": {
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": { "type": "string" },
+                          "value": { "type": "string" },
+                          "need": { "type": "integer", "description": "该作息表需要的最少课节数" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/config/{school}/{grade}/timetable": {
+      "get": {
+        "summary": "获取作息配置",
+        "description": "返回作息表（timetable）、分隔符（divider）和开学日期（start）。",
+        "operationId": "getTimetable",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "作息配置",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimetableConfig" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "更新作息配置",
+        "description": "更新作息表配置。必须包含「常日」作息；divider 键会与 timetable 自动同步。需要 BasicAuth 认证。",
+        "operationId": "putTimetable",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TimetableConfig" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200" }
+              }
+            }
+          },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/config/{school}/{grade}/{class_number}/schedule": {
+      "get": {
+        "summary": "获取班级课表配置",
+        "description": "返回管理端格式的课表配置，classList 为二维数组（每位教师单独一行），课节数不足时自动补「课」。",
+        "operationId": "getScheduleConfig",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "课表配置（管理端格式）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["daily_class"],
+                  "properties": {
+                    "daily_class": {
+                      "type": "array",
+                      "minItems": 7,
+                      "maxItems": 7,
+                      "items": { "$ref": "#/components/schemas/DailyClassInput" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "更新班级课表配置",
+        "description": "支持带 `model` 包装或无包装两种格式。需要 BasicAuth 认证。",
+        "operationId": "putScheduleConfig",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["daily_class"],
+                    "properties": {
+                      "daily_class": {
+                        "type": "array",
+                        "items": { "$ref": "#/components/schemas/DailyClassInput" }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": ["model"],
+                    "properties": {
+                      "model": {
+                        "type": "object",
+                        "required": ["daily_class"],
+                        "properties": {
+                          "daily_class": {
+                            "type": "array",
+                            "items": { "$ref": "#/components/schemas/DailyClassInput" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200" }
+              }
+            }
+          },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/config/{school}/{grade}/{class_number}/settings": {
+      "get": {
+        "summary": "获取班级通用设置",
+        "description": "返回倒计时目标、天气预警、星期显示、横幅文本、CSS 样式等通用配置。",
+        "operationId": "getSettings",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "通用设置",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ClientConfigItems" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "更新班级通用设置",
+        "description": "需要 BasicAuth 认证。",
+        "operationId": "putSettings",
+        "tags": ["web-config"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ClientConfigItems" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200" }
+              }
+            }
+          },
+          "400": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/config/copy": {
+      "post": {
+        "summary": "复制配置（科目/作息/课表/设置）",
+        "description": "将一个班级的完整配置（科目、作息、课表、通用设置）复制到另一个班级。源和目标不能相同。需要 BasicAuth 认证。",
+        "operationId": "copyConfig",
+        "tags": ["web-config"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CopyConfigPayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "复制成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "from", "to"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "from": { "$ref": "#/components/schemas/CopyScopeResponse" },
+                    "to": { "$ref": "#/components/schemas/CopyScopeResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "404": {
+            "description": "源配置不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun": {
+      "get": {
+        "summary": "获取自动任务列表",
+        "description": "返回所有自动任务记录，含过期/生效中/待生效状态判定。",
+        "operationId": "getAutorunStatus",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "自动任务列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AutorunRecordView" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/autorun/hash/{hashid}": {
+      "get": {
+        "summary": "按 HashID 查询自动任务",
+        "description": "无记录时 data 为空数组。",
+        "operationId": "getAutorunHashStatus",
+        "tags": ["web-autorun"],
+        "parameters": [
+          {
+            "name": "hashid", "in": "path", "description": "自动任务 HashID", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        { "type": "array", "items": { "$ref": "#/components/schemas/AutorunRecordView" } },
+                        { "$ref": "#/components/schemas/AutorunRecordView" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/autorun/{hashid}": {
+      "delete": {
+        "summary": "删除自动任务",
+        "description": "需要 BasicAuth 认证。",
+        "operationId": "deleteAutorunRecord",
+        "tags": ["web-autorun"],
+        "parameters": [
+          {
+            "name": "hashid", "in": "path", "description": "自动任务 HashID", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "deleted", "id"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "deleted": { "type": "integer", "format": "int64" },
+                    "id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "404": {
+            "description": "记录不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun/compensation": {
+      "put": {
+        "summary": "新增/更新调休规则",
+        "description": "type 字段会被服务端强制修正为 0。需要 BasicAuth 认证。",
+        "operationId": "putCompensationRule",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompensationRulePayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "自动任务写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun/timetable": {
+      "put": {
+        "summary": "新增/更新换作息规则",
+        "description": "type 字段会被服务端强制修正为 1。需要 BasicAuth 认证。",
+        "operationId": "putTimetableRule",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TimetableRulePayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "自动任务写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun/schedule": {
+      "put": {
+        "summary": "新增/更新换课规则",
+        "description": "type 字段会被服务端强制修正为 2。需要 BasicAuth 认证。",
+        "operationId": "putScheduleRule",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ScheduleRulePayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "自动任务写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun/all": {
+      "put": {
+        "summary": "新增/更新组合规则（作息+课表）",
+        "description": "type 字段会被服务端强制修正为 3。需要 BasicAuth 认证。",
+        "operationId": "putAllRule",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AllRulePayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "自动任务写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/autorun/compensation/holiday/{year}/{month}/{day}": {
+      "get": {
+        "summary": "根据节假日查询对应调休工作日",
+        "operationId": "compensationFromHoliday",
+        "tags": ["web-autorun"],
+        "parameters": [
+          {
+            "name": "year", "in": "path", "description": "年份", "required": true,
+            "schema": { "type": "integer" }, "example": 2026
+          },
+          {
+            "name": "month", "in": "path", "description": "月份", "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 12 }, "example": 5
+          },
+          {
+            "name": "day", "in": "path", "description": "日", "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 31 }, "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询结果",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompensationSingleResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/autorun/compensation/workday/{year}/{month}/{day}": {
+      "get": {
+        "summary": "根据工作日查询对应调休节假日",
+        "operationId": "compensationFromWorkday",
+        "tags": ["web-autorun"],
+        "parameters": [
+          {
+            "name": "year", "in": "path", "description": "年份", "required": true,
+            "schema": { "type": "integer" }, "example": 2026
+          },
+          {
+            "name": "month", "in": "path", "description": "月份", "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 12 }, "example": 5
+          },
+          {
+            "name": "day", "in": "path", "description": "日", "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 31 }, "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询结果",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompensationSingleResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/autorun/compensation/year/{year}": {
+      "get": {
+        "summary": "查询某年全部调休对照",
+        "operationId": "compensationFromYear",
+        "tags": ["web-autorun"],
+        "parameters": [
+          {
+            "name": "year", "in": "path", "description": "年份", "required": true,
+            "schema": { "type": "integer" }, "example": 2026
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询结果",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompensationYearResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/schedule/by-date": {
+      "get": {
+        "summary": "按日期出课节列表",
+        "description": "根据指定日期和 scope（school/grade/class），结合自动任务规则计算出当天的课节列表。",
+        "operationId": "getScheduleByDate",
+        "tags": ["web-schedule"],
+        "parameters": [
+          {
+            "name": "date", "in": "query", "description": "日期，格式 YYYY-MM-DD", "required": true,
+            "schema": { "type": "string", "format": "date" }
+          },
+          {
+            "name": "scope", "in": "query", "description": "作用域，格式 school/grade/class", "required": true,
+            "schema": { "type": "string" }, "example": "default/2024级/1班"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "课节列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["periods"],
+                      "properties": {
+                        "periods": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/Period" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/countdown": {
+      "get": {
+        "summary": "获取倒数日配置列表",
+        "description": "可通过 `scope` 查询参数过滤。",
+        "operationId": "getCountdownStatus",
+        "tags": ["web-countdown"],
+        "parameters": [
+          {
+            "name": "scope", "in": "query", "description": "作用域过滤，格式 school/grade/class",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "倒数日配置列表",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CountdownListResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "summary": "新增/更新倒数日配置",
+        "description": "当 `id` 为空时服务端会根据 scope+schedules 生成稳定 ID。需要 BasicAuth 认证。",
+        "operationId": "putCountdownRule",
+        "tags": ["web-countdown"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CountdownPayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    },
+    "/web/countdown/{id}": {
+      "get": {
+        "summary": "按 ID 查询倒数日配置",
+        "description": "无记录时 data 为空数组。",
+        "operationId": "getCountdownByID",
+        "tags": ["web-countdown"],
+        "parameters": [
+          {
+            "name": "id", "in": "path", "description": "倒数日配置 ID", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        { "type": "array", "items": { "$ref": "#/components/schemas/CountdownRecordView" } },
+                        { "$ref": "#/components/schemas/CountdownRecordView" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "delete": {
+        "summary": "删除倒数日配置",
+        "description": "需要 BasicAuth 认证。",
+        "operationId": "deleteCountdownRecord",
+        "tags": ["web-countdown"],
+        "parameters": [
+          {
+            "name": "id", "in": "path", "description": "倒数日配置 ID", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "deleted", "id"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "deleted": { "type": "integer", "format": "int64" },
+                    "id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Basic Auth 认证失败" },
+          "404": {
+            "description": "记录不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FullClientConfig": {
+        "description": "客户端上传完整配置的请求体（PUT /:school/:grade/:class）",
+        "type": "object",
+        "properties": {
+          "daily_class": {
+            "type": "array",
+            "minItems": 7,
+            "maxItems": 7,
+            "items": { "$ref": "#/components/schemas/DailyClass" }
+          },
+          "countdown_target": { "type": "string" },
+          "weather_alert_override": { "type": "boolean" },
+          "weather_alert_brief": { "type": "boolean" },
+          "week_display": { "type": "boolean" },
+          "banner_text": { "type": "string" },
+          "css_style": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "timetable": { "$ref": "#/components/schemas/TimetableMap" },
+          "divider": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "integer" }
+            }
+          },
+          "start": { "type": "string", "description": "开学日期" },
+          "subject_name": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "科目简称→全称映射"
+          }
+        }
+      },
+      "FullResponseConfig": {
+        "description": "客户端获取完整配置的响应体（GET /:school/:grade/:class）",
+        "allOf": [
+          { "$ref": "#/components/schemas/FullClientConfig" },
+          {
+            "type": "object",
+            "required": ["supportWebSocket", "version"],
+            "properties": {
+              "supportWebSocket": { "type": "boolean" },
+              "version": { "type": "string", "description": "Unix 时间戳秒" },
+              "countdown_records": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/CountdownRecordView" },
+                "description": "倒数日配置列表（已按 scope 过滤）"
+              }
+            }
+          }
+        ]
+      },
+      "DailyClass": {
+        "description": "一天的课表（客户端格式，classList 为一维数组）",
+        "type": "object",
+        "properties": {
+          "Chinese": { "type": "string", "description": "星期中文名" },
+          "English": { "type": "string", "description": "星期英文名" },
+          "classList": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "每节课的科目简称列表"
+          },
+          "timetable": { "type": "string", "description": "使用的作息表名称" }
+        }
+      },
+      "DailyClassInput": {
+        "description": "一天的课表（管理端格式，classList 为二维数组，每位教师单独一行）",
+        "type": "object",
+        "properties": {
+          "Chinese": { "type": "string" },
+          "English": { "type": "string" },
+          "classList": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "description": "每节课教师列表（二维数组）"
+          },
+          "timetable": { "type": "string" }
+        }
+      },
+      "ClientConfigItems": {
+        "type": "object",
+        "properties": {
+          "countdown_target": { "type": "string", "description": "倒计时目标日期" },
+          "weather_alert_override": { "type": "boolean", "description": "是否覆盖天气预警" },
+          "weather_alert_brief": { "type": "boolean", "description": "是否显示简要天气预警" },
+          "week_display": { "type": "boolean", "description": "是否显示星期" },
+          "banner_text": { "type": "string", "description": "横幅文本" },
+          "css_style": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "自定义 CSS 样式"
+          }
+        }
+      },
+      "TimetableMap": {
+        "type": "object",
+        "description": "作息表映射：键为作息名称（如「常日」），值为时间范围→课节索引/标签的映射。值可以是整数（课节号）、字符串（标签如「课间」）或数字。",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "integer" },
+              { "type": "number" },
+              { "type": "string" }
+            ]
+          }
+        }
+      },
+      "TimetableConfig": {
+        "type": "object",
+        "properties": {
+          "timetable": { "$ref": "#/components/schemas/TimetableMap" },
+          "divider": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "integer" }
+            },
+            "description": "分隔符配置：键为作息名称，值为分隔符位置的课节号数组"
+          },
+          "start": { "type": "string", "description": "开学日期（YYYY-MM-DD）" }
+        }
+      },
+      "SubjectsPayload": {
+        "type": "object",
+        "properties": {
+          "abbr": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TextItem" },
+            "description": "科目简称列表"
+          },
+          "fullName": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TextItem" },
+            "description": "科目全称列表（与 abbr 按索引一一对应）"
+          }
+        }
+      },
+      "TextItem": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        }
+      },
+      "WeatherResponse": {
+        "type": "object",
+        "properties": {
+          "where": { "type": "string", "description": "城市名" },
+          "temp": { "type": "string", "description": "温度" },
+          "weat": { "type": "string", "description": "天气状况" },
+          "wind": { "type": "string", "description": "风向" },
+          "wind_power": { "type": "string", "description": "风力" },
+          "warn": { "type": "string", "description": "预警详情" },
+          "brief_warn": { "type": "string", "description": "简要预警" }
+        }
+      },
+      "WeatherNotFoundResponse": {
+        "type": "object",
+        "properties": {
+          "temp": { "type": "string", "example": "404" },
+          "weat": { "type": "string", "example": "不存在" },
+          "warning": { "type": "string" },
+          "brief_warn": { "type": "string" }
+        }
+      },
+      "BroadcastResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "integer" },
+          "message": { "type": "string", "example": "SyncConfig" },
+          "sent": { "type": "integer", "description": "成功发送的 WebSocket 消息数" },
+          "websocket_enabled": { "type": "boolean", "description": "WebSocket 功能是否启用" }
+        }
+      },
+      "StatisticResponse": {
+        "type": "object",
+        "properties": {
+          "weather_error": { "type": "integer", "description": "天气查询错误次数" },
+          "websocket_disconnect": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "WebSocket 断开统计"
+          },
+          "websocket_disconnect_count": { "type": "integer" },
+          "clients": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "当前在线客户端标识列表"
+          },
+          "clients_count": { "type": "integer", "description": "当前在线客户端数量" },
+          "serverless": { "type": "boolean", "description": "是否为 Serverless 模式（true 时 WebSocket 禁用）" }
+        }
+      },
+      "MenuNode": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "description": "路由路径" },
+          "text": { "type": "string", "description": "显示文本" },
+          "key": { "type": "string" },
+          "raw": { "type": "string" },
+          "children": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MenuNode" },
+            "nullable": true
+          }
+        }
+      },
+      "StructureNode": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "children": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/StructureNode" },
+            "nullable": true
+          }
+        }
+      },
+      "CopyScopePayload": {
+        "type": "object",
+        "properties": {
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "class": { "type": "string" },
+          "class_number": { "type": "string", "description": "班级（与 class 等价，兼容旧格式）" }
+        }
+      },
+      "CopyConfigPayload": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "$ref": "#/components/schemas/CopyScopePayload" },
+          "to": { "$ref": "#/components/schemas/CopyScopePayload" }
+        }
+      },
+      "CopyScopeResponse": {
+        "type": "object",
+        "properties": {
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "class": { "type": "string" }
+        }
+      },
+      "ScopeField": {
+        "description": "作用域字段，支持单个 scope 字符串（school/grade/class）或字符串数组，也可为空表示 ALL。",
+        "oneOf": [
+          { "type": "string" },
+          { "type": "array", "items": { "type": "string" } }
+        ]
+      },
+      "AutorunRecordView": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "HashID" },
+          "type": {
+            "type": "string",
+            "description": "任务类型：COMPENSATION(0) | TIMETABLE(1) | SCHEDULE(2) | ALL(3)"
+          },
+          "priority": { "type": "integer" },
+          "status": {
+            "type": "string",
+            "description": "任务状态：待生效 | 生效中 | 已过期"
+          },
+          "scope": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "作用域列表"
+          },
+          "content": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "规则内容（根据 type 不同结构不同）"
+          }
+        }
+      },
+      "SchedulePeriod": {
+        "type": "object",
+        "required": ["no", "subject"],
+        "properties": {
+          "no": { "type": "integer", "minimum": 1, "description": "课节序号" },
+          "subject": { "type": "string", "description": "科目简称" }
+        }
+      },
+      "CompensationRulePayload": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "integer",
+            "description": "输入会被服务端修正为 0"
+          },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "priority": { "type": "integer" },
+          "id": { "type": "string", "description": "可选；不传时生成" },
+          "content": {
+            "type": "object",
+            "required": ["date", "useDate"],
+            "properties": {
+              "date": { "type": "string", "format": "date", "description": "节假日日期" },
+              "useDate": { "type": "string", "format": "date", "description": "对应的补班工作日" }
+            }
+          }
+        }
+      },
+      "TimetableRulePayload": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "integer",
+            "description": "输入会被服务端修正为 1"
+          },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "priority": { "type": "integer" },
+          "id": { "type": "string" },
+          "content": {
+            "type": "object",
+            "required": ["date", "timetableId"],
+            "properties": {
+              "date": { "type": "string", "format": "date" },
+              "timetableId": { "type": "string", "description": "作息表名称" }
+            }
+          }
+        }
+      },
+      "ScheduleRulePayload": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "integer",
+            "description": "输入会被服务端修正为 2"
+          },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "priority": { "type": "integer" },
+          "id": { "type": "string" },
+          "content": {
+            "type": "object",
+            "required": ["date", "schedule"],
+            "properties": {
+              "date": { "type": "string", "format": "date" },
+              "schedule": {
+                "type": "object",
+                "required": ["periods"],
+                "properties": {
+                  "periods": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/SchedulePeriod" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AllRulePayload": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "integer",
+            "description": "输入会被服务端修正为 3"
+          },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "priority": { "type": "integer" },
+          "id": { "type": "string" },
+          "content": {
+            "type": "object",
+            "required": ["date", "timetableId", "schedule"],
+            "properties": {
+              "date": { "type": "string", "format": "date" },
+              "timetableId": { "type": "string" },
+              "schedule": {
+                "type": "object",
+                "required": ["periods"],
+                "properties": {
+                  "periods": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/SchedulePeriod" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CompensationSingleResponse": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "format": "date", "description": "查询的日期" },
+          "compensation": {
+            "type": "string",
+            "format": "date",
+            "nullable": true,
+            "description": "对应的调休日期；无调休时为 null"
+          }
+        }
+      },
+      "CompensationYearResponse": {
+        "type": "object",
+        "properties": {
+          "year": { "type": "integer" },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "holiday": { "type": "string", "format": "date", "description": "节假日日期" },
+                "workday": { "type": "string", "format": "date", "description": "补班工作日" }
+              }
+            }
+          }
+        }
+      },
+      "Period": {
+        "type": "object",
+        "properties": {
+          "no": { "type": "integer", "description": "课节序号" },
+          "subject": { "type": "string", "description": "科目简称" }
+        }
+      },
+      "CountdownScheduleItem": {
+        "type": "object",
+        "required": ["name", "date", "priority"],
+        "properties": {
+          "name": { "type": "string", "description": "倒数日名称" },
+          "date": { "type": "string", "format": "date", "description": "目标日期（YYYY-MM-DD）" },
+          "priority": { "type": "integer", "description": "优先级，数字越大优先级越高" }
+        }
+      },
+      "CountdownPayload": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "可选；不传时服务端根据 scope+schedules 自动生成" },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "schedules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CountdownScheduleItem" }
+          }
+        }
+      },
+      "CountdownRecordView": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "scope": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "作用域列表"
+          },
+          "schedules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CountdownScheduleItem" }
+          }
+        }
+      },
+      "CountdownListResponse": {
+        "type": "object",
+        "required": ["loading", "hasConfig", "data"],
+        "properties": {
+          "loading": { "type": "boolean" },
+          "hasConfig": { "type": "boolean" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CountdownRecordView" }
+          }
+        }
+      },
+      "BackupMeta": {
+        "description": "备份元数据",
+        "type": "object",
+        "properties": {
+          "schema_version": { "type": "integer", "description": "备份格式版本号" },
+          "generated_at": { "type": "string", "description": "备份生成时间（RFC3339 格式）" }
+        }
+      },
+      "BackupPayload": {
+        "description": "完整备份数据结构，包含数据库中所有配置表的全量数据",
+        "type": "object",
+        "properties": {
+          "meta": { "$ref": "#/components/schemas/BackupMeta" },
+          "schedules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupScheduleRecord" },
+            "description": "课表配置"
+          },
+          "client_configs": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupClientConfigRecord" },
+            "description": "客户端通用设置"
+          },
+          "timetables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupTimetableRecord" },
+            "description": "作息配置"
+          },
+          "subjects": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupSubjectRecord" },
+            "description": "科目配置"
+          },
+          "data_versions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupDataVersionRecord" },
+            "description": "数据版本"
+          },
+          "autorun_records": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupAutorunRecord" },
+            "description": "自动任务记录"
+          },
+          "countdown_records": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BackupCountdownRecord" },
+            "description": "倒数日配置"
+          }
+        }
+      },
+      "BackupScheduleRecord": {
+        "description": "数据库课表记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64", "description": "主键（导入时会被重置为 0）" },
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "class": { "type": "string" },
+          "daily_class": {
+            "type": "array",
+            "minItems": 7,
+            "maxItems": 7,
+            "items": { "$ref": "#/components/schemas/DailyClass" }
+          }
+        }
+      },
+      "BackupClientConfigRecord": {
+        "description": "数据库客户端配置记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "class": { "type": "string" },
+          "countdown_target": { "type": "string" },
+          "weather_alert_override": { "type": "boolean" },
+          "weather_alert_brief": { "type": "boolean" },
+          "week_display": { "type": "boolean" },
+          "banner_text": { "type": "string" },
+          "css_style": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      },
+      "BackupTimetableRecord": {
+        "description": "数据库作息配置记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "timetable": { "$ref": "#/components/schemas/TimetableMap" },
+          "divider": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "integer" }
+            }
+          },
+          "start": { "type": "string", "description": "开学日期" }
+        }
+      },
+      "BackupSubjectRecord": {
+        "description": "数据库科目配置记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "subject_name": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "科目简称→全称映射"
+          }
+        }
+      },
+      "BackupDataVersionRecord": {
+        "description": "数据库版本记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "school": { "type": "string" },
+          "grade": { "type": "string" },
+          "class": { "type": "string" },
+          "version": { "type": "string", "format": "date-time", "description": "版本时间戳" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BackupAutorunRecord": {
+        "description": "数据库自动任务记录",
+        "type": "object",
+        "properties": {
+          "hashid": { "type": "string", "description": "HashID（主键）" },
+          "etype": { "type": "integer", "description": "任务类型：0=COMPENSATION, 1=TIMETABLE, 2=SCHEDULE, 3=ALL" },
+          "scope": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "规则参数"
+          },
+          "level": { "type": "integer", "description": "优先级" },
+          "status": { "type": "integer", "description": "状态：0=待生效, 1=生效中, 2=已过期" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BackupCountdownRecord": {
+        "description": "数据库倒数日配置记录",
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "配置 ID（主键）" },
+          "scope": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "schedules": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CountdownScheduleItem" }
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BackupImportResult": {
+        "description": "备份导入结果",
+        "type": "object",
+        "properties": {
+          "imported": {
+            "type": "object",
+            "additionalProperties": { "type": "integer" },
+            "description": "各表导入的条数（schedules, client_configs, timetables, subjects, data_versions, autorun_records, countdown_records）"
+          },
+          "total": { "type": "integer", "description": "总共导入的条数" }
+        }
+      },
+      "ErrorWithErrorField": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      },
+      "DetailResponse": {
+        "type": "object",
+        "properties": {
+          "detail": { "type": "string" }
+        }
+      },
+      "Status200": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "integer", "example": 200 }
+        }
+      },
+      "AutorunPutSuccess": {
+        "type": "object",
+        "required": ["status", "id"],
+        "properties": {
+          "status": { "type": "integer", "example": 200 },
+          "id": { "type": "string" }
+        }
+      }
+    },
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "用户名：`AstraSchedule` 或 `ElectronClassSchedule`\n密码：配置文件 `secret.token`"
+      },
+      "基本鉴权": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://class.khbit.cn",
+      "description": "正式环境"
+    }
+  ],
+  "security": []
+}
