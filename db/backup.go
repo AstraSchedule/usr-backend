@@ -203,6 +203,7 @@ func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig, mode string) 
 			"week_display",
 			"banner_text",
 			"css_style",
+			"startup_behavior",
 		},
 		mode: mode,
 	})

@@ -324,7 +324,8 @@ func CopyConfig(c *gin.Context) {
 			WeekDisplay:          srcSettings.WeekDisplay,
 			BannerText:           srcSettings.BannerText,
 			CSSStyle:             cloneStringMap(srcSettings.CSSStyle),
-			TemperatureColors:   srcSettings.TemperatureColors,
+			TemperatureColors:    srcSettings.TemperatureColors,
+			StartupBehavior:      srcSettings.StartupBehavior,
 		},
 	}
 

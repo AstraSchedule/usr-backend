@@ -11,13 +11,14 @@ type TemperatureColorsConfig struct {
 }
 
 type ClientConfigItems struct {
-	CountdownTarget      string                   `json:"countdown_target"`
-	WeatherAlertOverride bool                     `json:"weather_alert_override"`
-	WeatherAlertBrief    bool                     `json:"weather_alert_brief"`
-	WeekDisplay          bool                     `json:"week_display"`
-	BannerText           string                   `json:"banner_text"`
-	CSSStyle             map[string]string        `json:"css_style" gorm:"type:json;not null;serializer:json"`
-	TemperatureColors    TemperatureColorsConfig  `json:"temperature_colors" gorm:"type:json;serializer:json"`
+	CountdownTarget      string                  `json:"countdown_target"`
+	WeatherAlertOverride bool                    `json:"weather_alert_override"`
+	WeatherAlertBrief    bool                    `json:"weather_alert_brief"`
+	WeekDisplay          bool                    `json:"week_display"`
+	BannerText           string                  `json:"banner_text"`
+	CSSStyle             map[string]string       `json:"css_style" gorm:"type:json;not null;serializer:json"`
+	TemperatureColors    TemperatureColorsConfig `json:"temperature_colors" gorm:"type:json;serializer:json"`
+	StartupBehavior      string                  `json:"startup_behavior" gorm:"default:'normal';size:20"`
 }
 
 type ClientConfig struct {
