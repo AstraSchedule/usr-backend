@@ -114,10 +114,10 @@ func GetMenu(c *gin.Context) {
 					"text": classNumber + " 班",
 					"key":  classNodeKey,
 					"raw":  classNumber,
-				"children": []gin.H{
-					{"to": classConfigBasePath + "/" + classNumber + "/schedule", "text": "课表设置", "key": classNodeKey + "-schedule", "children": nil},
-					{"to": classConfigBasePath + "/" + classNumber + "/settings", "text": "通用设置", "key": classNodeKey + "-settings", "children": nil},
-				},
+					"children": []gin.H{
+						{"to": classConfigBasePath + "/" + classNumber + "/schedule", "text": "课表设置", "key": classNodeKey + "-schedule", "children": nil},
+						{"to": classConfigBasePath + "/" + classNumber + "/settings", "text": "通用设置", "key": classNodeKey + "-settings", "children": nil},
+					},
 				})
 			}
 			gradeChildren = append(gradeChildren, gin.H{"text": grade + " 级", "key": gradeNodeKey, "raw": grade, "children": children})

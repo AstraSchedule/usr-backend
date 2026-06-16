@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	dateFormat      = "2006-01-02"
+	dateFormat     = "2006-01-02"
 	invalidDateErr = "日期参数格式错误"
 )
 
