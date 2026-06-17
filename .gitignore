@@ -1,5 +1,14 @@
 .idea
+.vscode
 config.toml
 !config.template.toml
 temp
-.vscode
+
+*.exe
+*.zip
+*.log
+*.ps1
+.arms_build_tool/
+.otel-build/
+arms_cache/
+arms_log/
