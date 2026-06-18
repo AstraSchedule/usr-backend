@@ -113,6 +113,7 @@ jobs:
             fi
           done
           cp config.template.toml release_files/config.toml
+          cp AstraServerGo.openapi.json release_files/astra.openapi.json
           ls -la release_files/
 
       - name: Create Release
@@ -138,6 +139,7 @@ jobs:
             - Linux: `AstraScheduleServerGo-linux-amd64`, `AstraScheduleServerGo-linux-arm64`
             - macOS: `AstraScheduleServerGo-darwin-amd64`, `AstraScheduleServerGo-darwin-arm64`
             - Config: `config.toml` (from `config.template.toml`)
+            - OpenAPI: `astra.openapi.json` (from `AstraServerGo.openapi.json`)
           files: |
             release_files/*
           draft: false
