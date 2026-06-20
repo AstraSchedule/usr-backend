@@ -493,19 +493,6 @@
         "parameters": [],
         "requestBody": {
           "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "required": ["file"],
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "备份 JSON 文件（.json，最大 50MB）"
-                  }
-                }
-              }
-            },
             "application/json": {
               "schema": { "$ref": "#/components/schemas/BackupPayload" }
             }
@@ -587,24 +574,6 @@
         "parameters": [],
         "requestBody": {
           "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "备份 JSON 文件（.json，最大 50MB）"
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": ["overwrite", "skip"],
-                    "default": "overwrite",
-                    "description": "导入模式：overwrite=覆盖，skip=跳过已存在"
-                  }
-                }
-              }
-            },
             "application/json": {
               "schema": { "$ref": "#/components/schemas/BackupPayload" }
             }
