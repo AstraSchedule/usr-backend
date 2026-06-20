@@ -2506,7 +2506,15 @@
     }
   },
   "servers": [
-    { "url": "/" }
+    {
+      "url": "https://{hostname}",
+      "variables": {
+        "hostname": {
+          "default": "class.khbit.cn",
+          "description": "API 服务器域名"
+        }
+      }
+    }
   ],
   "security": []
 }
