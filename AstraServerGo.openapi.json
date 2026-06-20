@@ -2507,11 +2507,11 @@
   },
   "servers": [
     {
-      "url": "https://{hostname}",
+      "url": "https://{hostvar1}.getastra.cn",
       "variables": {
-        "hostname": {
-          "default": "class.khbit.cn",
-          "description": "API 服务器域名"
+        "hostvar1": {
+          "default": "class",
+          "description": "子域名前缀"
         }
       }
     }
