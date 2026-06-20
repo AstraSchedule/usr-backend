@@ -2505,11 +2505,6 @@
       }
     }
   },
-  "servers": [
-    {
-      "url": "https://class.khbit.cn",
-      "description": "正式环境"
-    }
-  ],
+  "servers": [],
   "security": []
 }
