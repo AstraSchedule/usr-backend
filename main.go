@@ -1,6 +1,7 @@
 package main
 
 import (
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/router/web"
@@ -36,6 +37,23 @@ func main() {
 		"AstraSchedule":         model.Configs.Secret.Token,
 		"ElectronClassSchedule": model.Configs.Secret.Token, // 兼容旧版本客户端
 	}))
+
+	// 认证接口（无需 JWT）
+	router.POST("/web/auth/login", web.Login)
+
+	// JWT 认证路由组
+	jwtAuth := router.Group("/", middleware.JWTAuthMiddleware())
+
+	// 用户信息与改密（需 JWT）
+	jwtAuth.GET("/web/auth/me", web.GetMe)
+	jwtAuth.POST("/web/auth/change-password", web.ChangePassword)
+
+	// 用户管理（需 JWT + admin 角色）
+	adminGroup := jwtAuth.Group("/", middleware.RequireRole("admin"))
+	adminGroup.GET("/web/users", web.ListUsers)
+	adminGroup.POST("/web/users", web.CreateUser)
+	adminGroup.PUT("/web/users/:id", web.UpdateUser)
+	adminGroup.DELETE("/web/users/:id", web.DeleteUser)
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
