@@ -12,6 +12,7 @@ import (
 type BackupMeta struct {
 	SchemaVersion int    `json:"schema_version"`
 	GeneratedAt   string `json:"generated_at"`
+	Namespace     string `json:"namespace,omitempty"`
 }
 
 type BackupPayload struct {
@@ -62,34 +63,46 @@ func resetIDsToZero(slice any) {
 	}
 }
 
+// ExportBackup 导出备份（无命名空间，向后兼容）
 func ExportBackup() (*BackupPayload, error) {
+	return ExportBackupNs("")
+}
+
+// ExportBackupNs 导出备份（带命名空间）
+func ExportBackupNs(namespace string) (*BackupPayload, error) {
 	dbConn := GetDB()
 	payload := &BackupPayload{
 		Meta: BackupMeta{
 			SchemaVersion: 1,
 			GeneratedAt:   time.Now().Format(time.RFC3339),
+			Namespace:     namespace,
 		},
 	}
 
-	if err := dbConn.Order(orderByIDAsc).Find(&payload.Schedules).Error; err != nil {
+	base := dbConn
+	if namespace != "" {
+		base = base.Where("namespace = ?", namespace)
+	}
+
+	if err := base.Order(orderByIDAsc).Find(&payload.Schedules).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByIDAsc).Find(&payload.ClientConfigs).Error; err != nil {
+	if err := base.Order(orderByIDAsc).Find(&payload.ClientConfigs).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByIDAsc).Find(&payload.Timetables).Error; err != nil {
+	if err := base.Order(orderByIDAsc).Find(&payload.Timetables).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByIDAsc).Find(&payload.Subjects).Error; err != nil {
+	if err := base.Order(orderByIDAsc).Find(&payload.Subjects).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByIDAsc).Find(&payload.DataVersions).Error; err != nil {
+	if err := base.Order(orderByIDAsc).Find(&payload.DataVersions).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByCreatedAtAsc).Find(&payload.AutorunRecords).Error; err != nil {
+	if err := base.Order(orderByCreatedAtAsc).Find(&payload.AutorunRecords).Error; err != nil {
 		return nil, err
 	}
-	if err := dbConn.Order(orderByCreatedAtAsc).Find(&payload.CountdownRecord).Error; err != nil {
+	if err := base.Order(orderByCreatedAtAsc).Find(&payload.CountdownRecord).Error; err != nil {
 		return nil, err
 	}
 
@@ -187,7 +200,7 @@ func importRows[T any](tx *gorm.DB, rows []T, spec onConflictSpec) (int, error) 
 
 func importSchedules(tx *gorm.DB, rows []dbTable.Schedule, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
-		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		columns:    []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{"daily_classes"},
 		mode:       mode,
 	})
@@ -195,7 +208,7 @@ func importSchedules(tx *gorm.DB, rows []dbTable.Schedule, mode string) (int, er
 
 func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
-		columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{
 			"countdown_target",
 			"weather_alert_override",
@@ -211,7 +224,7 @@ func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig, mode string) 
 
 func importTimetables(tx *gorm.DB, rows []dbTable.Timetable, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
-		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
+		columns:    []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}},
 		updateCols: []string{"timetable", "divider", "start_date"},
 		mode:       mode,
 	})
@@ -219,7 +232,7 @@ func importTimetables(tx *gorm.DB, rows []dbTable.Timetable, mode string) (int, 
 
 func importSubjects(tx *gorm.DB, rows []dbTable.Subject, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
-		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}},
+		columns:    []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}},
 		updateCols: []string{"subject_name"},
 		mode:       mode,
 	})
@@ -227,7 +240,7 @@ func importSubjects(tx *gorm.DB, rows []dbTable.Subject, mode string) (int, erro
 
 func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion, mode string) (int, error) {
 	return importRows(tx, rows, onConflictSpec{
-		columns:    []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		columns:    []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		updateCols: []string{"version", "updated_at"},
 		mode:       mode,
 	})
@@ -248,6 +261,7 @@ func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string
 		onConflict = clause.OnConflict{
 			Columns: []clause.Column{{Name: "hash_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
+				"namespace",
 				"e_type",
 				"scope",
 				"parameters",
@@ -281,6 +295,7 @@ func importCountdownRecords(tx *gorm.DB, rows []dbTable.CountdownRecord, mode st
 		onConflict = clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
+				"namespace",
 				"scope",
 				"schedules",
 				"created_at",
