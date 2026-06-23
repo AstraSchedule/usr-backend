@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	scopeClassWhere    = "school = ? AND grade = ? AND class = ?"
-	scopeGradeWhere    = "school = ? AND grade = ?"
-	scopeNsClassWhere  = "namespace = ? AND school = ? AND grade = ? AND class = ?"
-	scopeNsGradeWhere  = "namespace = ? AND school = ? AND grade = ?"
+	scopeClassWhere   = "school = ? AND grade = ? AND class = ?"
+	scopeGradeWhere   = "school = ? AND grade = ?"
+	scopeNsClassWhere = "namespace = ? AND school = ? AND grade = ? AND class = ?"
+	scopeNsGradeWhere = "namespace = ? AND school = ? AND grade = ?"
 )
 
 // GetLatestVersion 获取最新版本（无命名空间，向后兼容）
