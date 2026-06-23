@@ -2507,13 +2507,7 @@
   },
   "servers": [
     {
-      "url": "https://{hostvar1}.getastra.cn",
-      "variables": {
-        "hostvar1": {
-          "default": "class",
-          "description": "子域名前缀"
-        }
-      }
+      "url": "https://{hostvar1}.getastra.cn"
     }
   ],
   "security": []

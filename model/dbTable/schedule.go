@@ -1,10 +1,10 @@
 package dbTable
 
 type DailyClass struct {
-	Chinese   string   `json:"Chinese"`
-	English   string   `json:"English"`
-	ClassList []string `json:"classList" gorm:"type:json;serializer:json"`
-	Timetable string   `json:"timetable"`
+	Chinese   string     `json:"Chinese"`
+	English   string     `json:"English"`
+	ClassList [][]string `json:"classList" gorm:"type:json;serializer:json"`
+	Timetable string     `json:"timetable"`
 }
 
 type Schedule struct {

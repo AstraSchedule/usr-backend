@@ -78,10 +78,10 @@ func cloneDailyClasses(src [7]dbTable.DailyClass) [7]dbTable.DailyClass {
 			Timetable: src[i].Timetable,
 		}
 		if src[i].ClassList != nil {
-			out[i].ClassList = make([]string, len(src[i].ClassList))
+			out[i].ClassList = make([][]string, len(src[i].ClassList))
 			copy(out[i].ClassList, src[i].ClassList)
 		} else {
-			out[i].ClassList = []string{}
+			out[i].ClassList = [][]string{}
 		}
 	}
 	return out
@@ -405,8 +405,8 @@ func GetScheduleConfig(c *gin.Context) {
 		}
 		classList := make([][]string, 0, len(day.ClassList))
 		for _, s := range day.ClassList {
-			// 保留原始格式：单周课程为 "物"，多周轮换为 "物,化,地,数"
-			classList = append(classList, []string{s})
+			// 直接使用数据库格式 [["物"], ["数"]] 或 [["物", "化"], ["数"]]
+			classList = append(classList, s)
 		}
 		for len(classList) < maxSubjects {
 			classList = append(classList, []string{"课"})

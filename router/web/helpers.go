@@ -97,17 +97,17 @@ func toString(v interface{}) string {
 	}
 }
 
-func parseClassList(input [][]string) []string {
+func parseClassList(input [][]string) [][]string {
 	if len(input) == 0 {
-		return []string{}
+		return [][]string{}
 	}
-	out := make([]string, 0, len(input))
+	out := make([][]string, 0, len(input))
 	for _, item := range input {
 		if len(item) == 0 {
-			out = append(out, "")
+			out = append(out, []string{""})
 			continue
 		}
-		out = append(out, item[0])
+		out = append(out, item)
 	}
 	return out
 }

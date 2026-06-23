@@ -63,10 +63,22 @@ func GetSchedule(c *gin.Context) {
 		time.Now(),
 	)
 
-	// 根据当前周数解析多周轮换课程
+	// 根据当前周数解析多周轮换课程，生成扁平的 classList
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, time.Now())
+	type dailyClassFlat struct {
+		Chinese   string   `json:"Chinese"`
+		English   string   `json:"English"`
+		ClassList []string `json:"classList"`
+		Timetable string   `json:"timetable"`
+	}
+	flatDailyClasses := make([]dailyClassFlat, 7)
 	for i := range resolvedDailyClasses {
-		resolvedDailyClasses[i].ClassList = service.ResolveClassList(resolvedDailyClasses[i].ClassList, weekNumber)
+		flatDailyClasses[i] = dailyClassFlat{
+			Chinese:   resolvedDailyClasses[i].Chinese,
+			English:   resolvedDailyClasses[i].English,
+			ClassList: service.ResolveClassList(resolvedDailyClasses[i].ClassList, weekNumber),
+			Timetable: resolvedDailyClasses[i].Timetable,
+		}
 	}
 
 	// 获取并过滤倒数日记录
@@ -83,5 +95,15 @@ func GetSchedule(c *gin.Context) {
 		SubjectConfig:     subject.SubjectConfig,
 		CountdownRecords:  filteredCountdowns,
 	}
-	c.JSON(http.StatusOK, fullResponse)
+	// 覆盖 daily_class 为扁平化格式
+	fullResponseMap := map[string]interface{}{
+		"support_websocket": fullResponse.SupportWebsocket,
+		"version":           fullResponse.Version,
+		"daily_class":       flatDailyClasses,
+		"client_config":     fullResponse.ClientConfigItems,
+		"timetable":         fullResponse.TimetableConfig,
+		"subject":           fullResponse.SubjectConfig,
+		"countdown":         fullResponse.CountdownRecords,
+	}
+	c.JSON(http.StatusOK, fullResponseMap)
 }

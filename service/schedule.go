@@ -161,9 +161,9 @@ func applyPeriodsToDay(schedule *[7]dbTable.DailyClass, todayIdx int, rule map[s
 		periods = append(periods, pair{No: no, Subject: subject})
 	}
 	sort.Slice(periods, func(i, j int) bool { return periods[i].No < periods[j].No })
-	classList := make([]string, 0, len(periods))
+	classList := make([][]string, 0, len(periods))
 	for _, p := range periods {
-		classList = append(classList, p.Subject)
+		classList = append(classList, []string{p.Subject})
 	}
 	schedule[todayIdx].ClassList = classList
 }
@@ -179,7 +179,7 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 			continue
 		}
 		srcIdx := weekdayIndex(useDate)
-		resolved[todayIdx].ClassList = append([]string(nil), resolved[srcIdx].ClassList...)
+		resolved[todayIdx].ClassList = append([][]string(nil), resolved[srcIdx].ClassList...)
 		resolved[todayIdx].Timetable = resolved[srcIdx].Timetable
 	}
 
@@ -252,51 +252,46 @@ func FixWrongTimetable(schedule *[7]dbTable.DailyClass, timetable map[string]map
 		}
 		if len(day.ClassList) < need {
 			for len(day.ClassList) < need {
-				day.ClassList = append(day.ClassList, "课")
+				day.ClassList = append(day.ClassList, []string{"课"})
 			}
 		}
 	}
 }
 
-// CalcWeekNumber 根据开学日期和当前日期计算当前是第几周（从0开始）
+// CalcWeekNumber 根据开学日期和当前日期计算当前是第几周（从1开始）
 func CalcWeekNumber(startDateStr string, now time.Time) int {
 	if startDateStr == "" {
-		return 0
+		return 1
 	}
 	start, err := time.Parse("2006-01-02", startDateStr)
 	if err != nil {
-		return 0
+		return 1
 	}
 	days := int(now.Sub(start).Hours() / 24)
 	if days < 0 {
-		return 0
+		return 1
 	}
-	return days / 7
+	return days/7 + 1
 }
 
 // ResolveClassList 根据当前周数解析 classList
-// classList 中的每个元素可能是：
-//   - 字符串 "物"：直接使用
-//   - 逗号分隔字符串 "物,化,地,数"：按周数轮换
-//
+// classList 格式为 [["数", "语"], ["政"], ["史", "地", "物"]]
+// 每个内层数组代表该节课的多周轮换选项
 // 返回扁平的 []string，供客户端直接使用
-func ResolveClassList(classList []string, weekNumber int) []string {
+func ResolveClassList(classList [][]string, weekNumber int) []string {
 	if len(classList) == 0 {
-		return classList
+		return []string{}
 	}
 	resolved := make([]string, 0, len(classList))
 	for _, item := range classList {
-		// 检查是否包含逗号（多周轮换格式）
-		if strings.Contains(item, ",") {
-			options := strings.Split(item, ",")
-			// 去除空白
-			for i := range options {
-				options[i] = strings.TrimSpace(options[i])
-			}
-			idx := weekNumber % len(options)
-			resolved = append(resolved, options[idx])
+		if len(item) == 0 {
+			resolved = append(resolved, "")
+		} else if len(item) == 1 {
+			resolved = append(resolved, item[0])
 		} else {
-			resolved = append(resolved, item)
+			// 多周轮换：按周数索引取值（从1开始，所以用 weekNumber-1）
+			idx := (weekNumber - 1) % len(item)
+			resolved = append(resolved, item[idx])
 		}
 	}
 	return resolved
@@ -322,8 +317,8 @@ func BuildPeriodsForDate(schedule [7]dbTable.DailyClass, timetable map[string]ma
 	out := make([]Period, 0, len(indices))
 	for _, i := range indices {
 		subject := ""
-		if i >= 0 && i < len(day.ClassList) {
-			subject = day.ClassList[i]
+		if i >= 0 && i < len(day.ClassList) && len(day.ClassList[i]) > 0 {
+			subject = day.ClassList[i][0]
 		}
 		out = append(out, Period{No: i + 1, Subject: subject})
 	}
