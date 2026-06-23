@@ -36,6 +36,38 @@ const (
 	orderByCreatedAtAsc = "created_at ASC"
 )
 
+// setSliceNamespace 使用 reflect 将切片中所有元素的 Namespace 字段设为指定值
+func setSliceNamespace(slice any, ns string) {
+	v := reflect.ValueOf(slice)
+	if v.Kind() != reflect.Slice {
+		return
+	}
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i)
+		if elem.Kind() == reflect.Ptr {
+			elem = elem.Elem()
+		}
+		if elem.Kind() != reflect.Struct {
+			continue
+		}
+		nsField := elem.FieldByName("Namespace")
+		if nsField.IsValid() && nsField.CanSet() && nsField.Kind() == reflect.String {
+			nsField.SetString(ns)
+		}
+	}
+}
+
+// overrideBackupNamespace 将备份数据中所有记录的 Namespace 设为指定值
+func overrideBackupNamespace(payload *BackupPayload, ns string) {
+	setSliceNamespace(payload.Schedules, ns)
+	setSliceNamespace(payload.ClientConfigs, ns)
+	setSliceNamespace(payload.Timetables, ns)
+	setSliceNamespace(payload.Subjects, ns)
+	setSliceNamespace(payload.DataVersions, ns)
+	setSliceNamespace(payload.AutorunRecords, ns)
+	setSliceNamespace(payload.CountdownRecord, ns)
+}
+
 // resetIDsToZero 将切片中所有元素的 ID 字段重置为 0，让数据库自动分配新 ID
 func resetIDsToZero(slice any) {
 	v := reflect.ValueOf(slice)
@@ -109,9 +141,21 @@ func ExportBackupNs(namespace string) (*BackupPayload, error) {
 	return payload, nil
 }
 
+// ImportBackup 导入备份（向后兼容，不覆盖命名空间）
 func ImportBackup(payload *BackupPayload, mode string) (*BackupImportResult, error) {
+	return ImportBackupNs(payload, mode, "")
+}
+
+// ImportBackupNs 导入备份，可指定目标命名空间覆盖导入数据的 namespace
+// overrideNs 为空时不覆盖，保持备份数据原有的 namespace
+func ImportBackupNs(payload *BackupPayload, mode string, overrideNs string) (*BackupImportResult, error) {
 	if payload == nil {
 		return nil, gorm.ErrInvalidData
+	}
+
+	// 如果指定了目标命名空间，覆盖所有记录的 namespace
+	if overrideNs != "" {
+		overrideBackupNamespace(payload, overrideNs)
 	}
 
 	// 默认 overwrite 模式

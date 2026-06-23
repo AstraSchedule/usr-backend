@@ -54,7 +54,13 @@ func ImportBackup(c *gin.Context) {
 		return
 	}
 
-	result, err := db.ImportBackup(payload, "overwrite")
+	// 支持通过 query 参数或 form 字段指定目标命名空间
+	overrideNs := c.Query("namespace")
+	if overrideNs == "" {
+		overrideNs = c.PostForm("namespace")
+	}
+
+	result, err := db.ImportBackupNs(payload, "overwrite", overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -148,7 +154,13 @@ func FullImportBackup(c *gin.Context) {
 		return
 	}
 
-	result, err := db.ImportBackup(payload, mode)
+	// 支持通过 query 参数或 form 字段指定目标命名空间
+	overrideNs := c.Query("namespace")
+	if overrideNs == "" {
+		overrideNs = c.PostForm("namespace")
+	}
+
+	result, err := db.ImportBackupNs(payload, mode, overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
