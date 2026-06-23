@@ -405,6 +405,7 @@ func GetScheduleConfig(c *gin.Context) {
 		}
 		classList := make([][]string, 0, len(day.ClassList))
 		for _, s := range day.ClassList {
+			// 保留原始格式：单周课程为 "物"，多周轮换为 "物,化,地,数"
 			classList = append(classList, []string{s})
 		}
 		for len(classList) < maxSubjects {
