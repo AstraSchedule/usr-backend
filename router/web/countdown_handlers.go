@@ -52,11 +52,48 @@ func makeCountdownID(scope []string, schedules []dbTable.CountdownScheduleItem) 
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+func computeCountdownStatus(date string) string {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return "未知"
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	daysLeft := int(t.Sub(today).Hours() / 24)
+	if daysLeft < 0 {
+		return "已过期"
+	} else if daysLeft == 0 {
+		return "就是今天"
+	}
+	return "生效中"
+}
+
+func mapCountdownScheduleItem(it dbTable.CountdownScheduleItem) gin.H {
+	return gin.H{
+		"name":     it.Name,
+		"date":     it.Date,
+		"priority": it.Priority,
+		"status":   computeCountdownStatus(it.Date),
+	}
+}
+
 func mapCountdownRecord(r dbTable.CountdownRecord) gin.H {
+	schedules := make([]gin.H, 0, len(r.Schedules))
+	allExpired := len(r.Schedules) > 0
+	for _, s := range r.Schedules {
+		schedules = append(schedules, mapCountdownScheduleItem(s))
+		if computeCountdownStatus(s.Date) != "已过期" {
+			allExpired = false
+		}
+	}
+	status := "已过期"
+	if !allExpired {
+		status = "生效中"
+	}
 	return gin.H{
 		"id":        r.ID,
 		"scope":     r.Scope,
-		"schedules": r.Schedules,
+		"schedules": schedules,
+		"status":    status,
 	}
 }
 
