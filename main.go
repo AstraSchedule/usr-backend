@@ -1,6 +1,7 @@
 package main
 
 import (
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/router/web"
@@ -29,6 +30,7 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+	router.Use(middleware.NamespaceMiddleware())
 
 	weatherCacheStore := persistence.NewInMemoryStore(10 * time.Minute)
 

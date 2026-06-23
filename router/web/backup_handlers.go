@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"encoding/json"
 	"errors"
 	"mime/multipart"
@@ -18,7 +19,8 @@ import (
 const maxBackupImportSize = 50 << 20 // 50MB
 
 func ExportBackup(c *gin.Context) {
-	payload, err := db.ExportBackup()
+	ns := middleware.GetNamespace(c)
+	payload, err := db.ExportBackupNs(ns)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -103,7 +105,8 @@ func parseBackupPayload(c *gin.Context) (*db.BackupPayload, error) {
 
 // FullExportBackup 完整备份导出（使用 BasicAuth 验证）
 func FullExportBackup(c *gin.Context) {
-	payload, err := db.ExportBackup()
+	ns := middleware.GetNamespace(c)
+	payload, err := db.ExportBackupNs(ns)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

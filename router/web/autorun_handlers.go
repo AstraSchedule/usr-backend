@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
 	"strconv"
@@ -32,16 +33,17 @@ func validateDateField(c *gin.Context, fieldName string, value string) bool {
 }
 
 func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
+	ns := middleware.GetNamespace(c)
 	scope := parseScopeInput(payload.Scope)
 	if hashID == "" {
 		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
 	}
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
+	record := dbTable.AutorunRecord{HashID: hashID, Namespace: ns, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
 	if err := db.UpsertAutorunRecord(&record); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
 	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
 }
 
@@ -88,8 +90,9 @@ func mapAutorunRecord(r dbTable.AutorunRecord) gin.H {
 }
 
 func GetAutorunStatus(c *gin.Context) {
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	rows, err := db.FetchAutorunRecords("")
+	ns := middleware.GetNamespace(c)
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
+	rows, err := db.FetchAutorunRecordsNs(ns, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -102,9 +105,10 @@ func GetAutorunStatus(c *gin.Context) {
 }
 
 func GetAutorunHashStatus(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	hashid := c.Param("hashid")
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	rows, err := db.FetchAutorunRecords(hashid)
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
+	rows, err := db.FetchAutorunRecordsNs(ns, hashid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -117,8 +121,9 @@ func GetAutorunHashStatus(c *gin.Context) {
 }
 
 func DeleteAutorunRecord(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	hashid := c.Param("hashid")
-	affected, err := db.DeleteAutorunRecord(hashid)
+	affected, err := db.DeleteAutorunRecordNs(ns, hashid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -127,7 +132,7 @@ func DeleteAutorunRecord(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
 		return
 	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
 
