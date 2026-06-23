@@ -161,7 +161,7 @@ func applyPeriodsToDay(schedule *[7]dbTable.DailyClass, todayIdx int, rule map[s
 		periods = append(periods, pair{No: no, Subject: subject})
 	}
 	sort.Slice(periods, func(i, j int) bool { return periods[i].No < periods[j].No })
-	classList := make([][]string, 0, len(periods))
+	classList := make(dbTable.ClassList, 0, len(periods))
 	for _, p := range periods {
 		classList = append(classList, []string{p.Subject})
 	}
@@ -179,7 +179,7 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 			continue
 		}
 		srcIdx := weekdayIndex(useDate)
-		resolved[todayIdx].ClassList = append([][]string(nil), resolved[srcIdx].ClassList...)
+		resolved[todayIdx].ClassList = append(dbTable.ClassList(nil), resolved[srcIdx].ClassList...)
 		resolved[todayIdx].Timetable = resolved[srcIdx].Timetable
 	}
 
@@ -278,7 +278,7 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 // classList 格式为 [["数", "语"], ["政"], ["史", "地", "物"]]
 // 每个内层数组代表该节课的多周轮换选项
 // 返回扁平的 []string，供客户端直接使用
-func ResolveClassList(classList [][]string, weekNumber int) []string {
+func ResolveClassList(classList dbTable.ClassList, weekNumber int) []string {
 	if len(classList) == 0 {
 		return []string{}
 	}

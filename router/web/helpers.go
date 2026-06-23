@@ -1,6 +1,7 @@
 package web
 
 import (
+	"AstraScheduleServerGo/model/dbTable"
 	"crypto/sha256"
 	"encoding/hex"
 	"sort"
@@ -97,11 +98,11 @@ func toString(v interface{}) string {
 	}
 }
 
-func parseClassList(input [][]string) [][]string {
+func parseClassList(input dbTable.ClassList) dbTable.ClassList {
 	if len(input) == 0 {
-		return [][]string{}
+		return dbTable.ClassList{}
 	}
-	out := make([][]string, 0, len(input))
+	out := make(dbTable.ClassList, 0, len(input))
 	for _, item := range input {
 		if len(item) == 0 {
 			out = append(out, []string{""})
