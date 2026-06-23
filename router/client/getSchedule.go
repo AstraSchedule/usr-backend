@@ -63,6 +63,12 @@ func GetSchedule(c *gin.Context) {
 		time.Now(),
 	)
 
+	// 根据当前周数解析多周轮换课程
+	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, time.Now())
+	for i := range resolvedDailyClasses {
+		resolvedDailyClasses[i].ClassList = service.ResolveClassList(resolvedDailyClasses[i].ClassList, weekNumber)
+	}
+
 	// 获取并过滤倒数日记录
 	classID := school + "/" + grade + "/" + class
 	allCountdowns, _ := db.FetchCountdownRecords("")

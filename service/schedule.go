@@ -258,6 +258,50 @@ func FixWrongTimetable(schedule *[7]dbTable.DailyClass, timetable map[string]map
 	}
 }
 
+// CalcWeekNumber 根据开学日期和当前日期计算当前是第几周（从0开始）
+func CalcWeekNumber(startDateStr string, now time.Time) int {
+	if startDateStr == "" {
+		return 0
+	}
+	start, err := time.Parse("2006-01-02", startDateStr)
+	if err != nil {
+		return 0
+	}
+	days := int(now.Sub(start).Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days / 7
+}
+
+// ResolveClassList 根据当前周数解析 classList
+// classList 中的每个元素可能是：
+//   - 字符串 "物"：直接使用
+//   - 逗号分隔字符串 "物,化,地,数"：按周数轮换
+//
+// 返回扁平的 []string，供客户端直接使用
+func ResolveClassList(classList []string, weekNumber int) []string {
+	if len(classList) == 0 {
+		return classList
+	}
+	resolved := make([]string, 0, len(classList))
+	for _, item := range classList {
+		// 检查是否包含逗号（多周轮换格式）
+		if strings.Contains(item, ",") {
+			options := strings.Split(item, ",")
+			// 去除空白
+			for i := range options {
+				options[i] = strings.TrimSpace(options[i])
+			}
+			idx := weekNumber % len(options)
+			resolved = append(resolved, options[idx])
+		} else {
+			resolved = append(resolved, item)
+		}
+	}
+	return resolved
+}
+
 func BuildPeriodsForDate(schedule [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, date time.Time) []Period {
 	idx := weekdayIndex(date)
 	day := schedule[idx]
