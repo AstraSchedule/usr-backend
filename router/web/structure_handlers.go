@@ -19,30 +19,12 @@ func CreateSchool(c *gin.Context) {
 		return
 	}
 
-	// 检查是否已存在
 	var count int64
 	db.GetDB().Model(&dbTable.Schedule{}).Where("school = ?", req.Name).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusConflict, gin.H{"detail": "学校已存在"})
 		return
 	}
-
-	// 创建一个空的默认记录来注册学校
-	schedule := dbTable.Schedule{
-		School: req.Name,
-		Grade:  "default",
-		Class:  "default",
-		DailyClasses: [7]dbTable.DailyClass{
-			{Chinese: "日", English: "SUN", Timetable: "没课"},
-			{Chinese: "一", English: "MON", Timetable: "常日"},
-			{Chinese: "二", English: "TUE", Timetable: "常日"},
-			{Chinese: "三", English: "WED", Timetable: "常日"},
-			{Chinese: "四", English: "THR", Timetable: "常日"},
-			{Chinese: "五", English: "FRI", Timetable: "常日"},
-			{Chinese: "六", English: "SAT", Timetable: "没课"},
-		},
-	}
-	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&schedule)
 
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "学校创建成功"})
 }
@@ -87,22 +69,6 @@ func CreateGrade(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"detail": "年级已存在"})
 		return
 	}
-
-	schedule := dbTable.Schedule{
-		School: school,
-		Grade:  req.Name,
-		Class:  "default",
-		DailyClasses: [7]dbTable.DailyClass{
-			{Chinese: "日", English: "SUN", Timetable: "没课"},
-			{Chinese: "一", English: "MON", Timetable: "常日"},
-			{Chinese: "二", English: "TUE", Timetable: "常日"},
-			{Chinese: "三", English: "WED", Timetable: "常日"},
-			{Chinese: "四", English: "THR", Timetable: "常日"},
-			{Chinese: "五", English: "FRI", Timetable: "常日"},
-			{Chinese: "六", English: "SAT", Timetable: "没课"},
-		},
-	}
-	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&schedule)
 
 	// 创建默认科目和作息表
 	subject := dbTable.Subject{
