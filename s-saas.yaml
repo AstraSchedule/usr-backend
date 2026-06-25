@@ -1,0 +1,39 @@
+edition: 3.0.0
+name: AstraSaaS-Go
+access: default
+
+vars:
+  region: cn-hongkong
+
+resources:
+  AstraSaaS-Go:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: AstraSaaS-Go
+      description: AstraSchedule SaaS Go Backend
+      runtime: custom
+      cpu: 0.5
+      memorySize: 512
+      diskSize: 10240
+      timeout: 300
+      internetAccess: true
+      instanceConcurrency: 1
+      logConfig: auto
+      customRuntimeConfig:
+        command:
+          - /code/bootstrap
+      environmentVariables:
+        GIN_MODE: release
+        TZ: Asia/Shanghai
+      triggers:
+        - triggerName: http-trigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS

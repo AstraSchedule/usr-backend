@@ -1,0 +1,69 @@
+name: Build and Deploy SaaS
+
+on:
+  push:
+    branches:
+      - saas/main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.26'
+
+      - name: Get dependencies
+        run: go mod tidy
+
+      - name: Build binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -o bootstrap
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap
+          path: bootstrap
+          retention-days: 1
+
+  deploy-fc:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bootstrap
+          path: build_artifacts
+
+      - name: Package binary
+        run: |
+          chmod +x build_artifacts/bootstrap
+          cd build_artifacts
+          zip ../code.zip bootstrap
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure credentials
+        run: |
+          s config add \
+            --accessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --accessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access default
+
+      - name: Deploy to FC
+        run: s deploy -t s-saas.yaml --function code -y
