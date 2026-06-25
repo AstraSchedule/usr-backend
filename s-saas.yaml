@@ -13,6 +13,7 @@ resources:
       functionName: AstraSaaS-Go
       description: AstraSchedule SaaS Go Backend
       runtime: custom
+      code: ./code.zip
       cpu: 0.5
       memorySize: 512
       diskSize: 10240
