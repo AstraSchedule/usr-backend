@@ -26,14 +26,6 @@ resources:
       environmentVariables:
         GIN_MODE: release
         TZ: Asia/Shanghai
-        ASTRA_RUN_SERVERLESS: "true"
-        ASTRA_DB_TYPE: sqlite
-        ASTRA_DB_PATH: /tmp/astra_schedule.db
-        ASTRA_SERVER_PORT: "9000"
-        ASTRA_SECRET_TOKEN: "${env('ASTRA_SECRET_TOKEN')}"
-        ASTRA_APIKEY_APIHOST: "${env('ASTRA_APIKEY_APIHOST')}"
-        ASTRA_APIKEY_WEATHER: "${env('ASTRA_APIKEY_WEATHER')}"
-        ASTRA_SERVER_DOMAIN: "${env('ASTRA_SERVER_DOMAIN')}"
       triggers:
         - triggerName: http-trigger
           triggerType: http
