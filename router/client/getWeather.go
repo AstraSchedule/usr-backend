@@ -140,46 +140,68 @@ func generateQWeatherJWT(cfg model.JWTAuthConfig) (string, error) {
 	return signingInput + "." + signatureEncoded, nil
 }
 
+// buildCityLookupURL 构建城市查询 URL
+func buildCityLookupURL(name, adm, host string) string {
+	if adm != "" {
+		return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s&adm=%s", host, name, adm)
+	}
+	return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s", host, name)
+}
+
+// parseLocationResult 解析城市查询结果
+func parseLocationResult(result map[string]interface{}) (*model.LocationResp, error) {
+	results, ok := result["location"].([]interface{})
+	if !ok || len(results) == 0 {
+		return nil, fmt.Errorf("未找到城市信息")
+	}
+
+	location, ok := results[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("城市信息格式错误")
+	}
+
+	id, idOk := location["id"].(string)
+	latStr, latOk := location["lat"].(string)
+	lonStr, lonOk := location["lon"].(string)
+	name, nameOk := location["name"].(string)
+
+	if !idOk || !latOk || !lonOk || !nameOk {
+		return nil, fmt.Errorf("城市信息字段缺失")
+	}
+
+	lat, err1 := strconv.ParseFloat(latStr, 64)
+	lon, err2 := strconv.ParseFloat(lonStr, 64)
+	if err1 != nil || err2 != nil {
+		return nil, fmt.Errorf("经纬度解析失败")
+	}
+
+	return &model.LocationResp{ID: id, Lat: lat, Lon: lon, Name: name}, nil
+}
+
 // cityLookup 查询城市位置信息
 func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.LocationResp, error) {
-	// 如果没有提供城市名，直接返回错误
 	if name == "" {
 		return nil, fmt.Errorf("城市名不能为空")
 	}
 
-	// 检查缓存
 	cacheKey := fmt.Sprintf("%s_%s", name, adm)
 	if cachedValue, ok := cache.Load(cacheKey); ok {
 		cachedLoc := cachedValue.(*model.LocationResp)
-		logrus.Infof(
-			"Cache hit: name = %s, adm = %s -> id: %s | lat: %f, lon: %f",
-			name, adm, cachedLoc.ID, cachedLoc.Lat, cachedLoc.Lon,
-		)
+		logrus.Infof("Cache hit: name = %s, adm = %s -> id: %s | lat: %f, lon: %f",
+			name, adm, cachedLoc.ID, cachedLoc.Lat, cachedLoc.Lon)
 		return cachedLoc, nil
 	}
 
-	// 构建请求 URL
-	var url string
-	if adm != "" {
-		// 如果提供了省份信息
-		url = fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s&adm=%s", host, name, adm)
-	} else {
-		// 如果没有提供省份信息
-		url = fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s", host, name)
-	}
-
-	// 使用 resty 发起请求
+	url := buildCityLookupURL(name, adm, host)
 	client := resty.New()
 	req, err := createQWeatherRequest(client, cfg)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := req.Get(url)
-
 	if err != nil {
 		return nil, fmt.Errorf("请求API失败: %w", err)
 	}
-
 	if resp.StatusCode() != 200 {
 		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d", url, resp.StatusCode())
 	}
@@ -188,42 +210,17 @@ func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.Location
 	if err := json.Unmarshal(resp.Body(), &result); err != nil {
 		return nil, fmt.Errorf("解析JSON响应失败: %w", err)
 	}
-
 	if code, ok := result["code"].(string); !ok || code != "200" {
 		return nil, fmt.Errorf("API返回错误码: %v", result["code"])
 	}
 
-	// 获取第一个城市结果
-	if results, ok := result["location"].([]interface{}); ok && len(results) > 0 {
-		if location, ok := results[0].(map[string]interface{}); ok {
-			id, idOk := location["id"].(string)
-			latStr, latOk := location["lat"].(string)
-			lonStr, lonOk := location["lon"].(string)
-			name, nameOk := location["name"].(string)
-
-			if idOk && latOk && lonOk && nameOk {
-				// 将字符串格式的经纬度转换为 float64
-				lat, err1 := strconv.ParseFloat(latStr, 64)
-				lon, err2 := strconv.ParseFloat(lonStr, 64)
-
-				if err1 == nil && err2 == nil {
-					result := &model.LocationResp{
-						ID:   id,
-						Lat:  lat,
-						Lon:  lon,
-						Name: name,
-					}
-
-					// 存入缓存
-					cache.Store(cacheKey, result)
-
-					return result, nil
-				}
-			}
-		}
+	locationResult, err := parseLocationResult(result)
+	if err != nil {
+		return nil, fmt.Errorf("未找到城市信息 (%s): %w", url, err)
 	}
 
-	return nil, fmt.Errorf("未找到城市信息 (%s)", url)
+	cache.Store(cacheKey, locationResult)
+	return locationResult, nil
 }
 
 // weatherLookup 查询指定位置的天气信息
