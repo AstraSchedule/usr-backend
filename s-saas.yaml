@@ -34,6 +34,9 @@ resources:
       instanceIsolationMode: SHARE
       customRuntimeConfig:
         port: 9000
+        command:
+          - ./bootstrap
+        healthCheckConfig: { }
       logConfig:
         enableRequestMetrics: true
         enableInstanceMetrics: true
