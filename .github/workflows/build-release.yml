@@ -180,4 +180,9 @@ jobs:
             --access default
 
       - name: Deploy to FC
+        env:
+          ASTRA_SECRET_TOKEN: ${{ secrets.ASTRA_SECRET_TOKEN }}
+          ASTRA_APIKEY_WEATHER: ${{ secrets.ASTRA_APIKEY_WEATHER }}
+          ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM: ${{ secrets.ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM }}
+          ARMS_LICENSE_KEY: ${{ secrets.ARMS_LICENSE_KEY }}
         run: s deploy --function code -y

@@ -66,4 +66,8 @@ jobs:
             --access default
 
       - name: Deploy to FC
+        env:
+          ASTRA_SECRET_TOKEN: ${{ secrets.ASTRA_SECRET_TOKEN }}
+          ASTRA_APIKEY_WEATHER: ${{ secrets.ASTRA_APIKEY_WEATHER }}
+          ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM: ${{ secrets.ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM }}
         run: s deploy -t s-saas.yaml --function code -y
