@@ -164,9 +164,10 @@ jobs:
 
       - name: Package binary
         run: |
-          chmod +x build_artifacts/AstraScheduleServerGo-linux-amd64
+          cp build_artifacts/AstraScheduleServerGo-linux-amd64 build_artifacts/bootstrap
+          chmod +x build_artifacts/bootstrap
           cd build_artifacts
-          zip ../code.zip AstraScheduleServerGo-linux-amd64
+          zip ../code.zip bootstrap
 
       - name: Install Serverless Devs
         run: npm install -g @serverless-devs/s

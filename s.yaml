@@ -22,7 +22,7 @@ resources:
       logConfig: auto
       customRuntimeConfig:
         command:
-          - /code/AstraScheduleServerGo-linux-amd64
+          - /code/bootstrap
       environmentVariables:
         GIN_MODE: release
         TZ: Asia/Shanghai
