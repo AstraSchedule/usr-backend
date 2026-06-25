@@ -52,9 +52,9 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-	validRoles := map[string]bool{"admin": true, "school_rw": true, "grade_rw": true, "class_rw": true}
+	validRoles := map[string]bool{"admin": true, "school_w": true, "grade_w": true, "class_w": true, "readonly": true}
 	if !validRoles[req.Role] {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的角色，可选: admin, school_rw, grade_rw, class_rw"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的角色，可选: admin, school_w, grade_w, class_w, readonly"})
 		return
 	}
 
@@ -130,7 +130,7 @@ func UpdateUser(c *gin.Context) {
 		user.MustChangePwd = false
 	}
 	if req.Role != nil {
-		validRoles := map[string]bool{"admin": true, "school_rw": true, "grade_rw": true, "class_rw": true}
+		validRoles := map[string]bool{"admin": true, "school_w": true, "grade_w": true, "class_w": true, "readonly": true}
 		if !validRoles[*req.Role] {
 			c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的角色"})
 			return

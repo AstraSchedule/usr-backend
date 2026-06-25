@@ -25,18 +25,13 @@ func main() {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     model.Configs.Server.Domain,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"},
+		AllowHeaders:     []string{"Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Verify-Password"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
 	weatherCacheStore := persistence.NewInMemoryStore(10 * time.Minute)
-
-	authorized := router.Group("/", gin.BasicAuth(gin.Accounts{
-		"AstraSchedule":         model.Configs.Secret.Token,
-		"ElectronClassSchedule": model.Configs.Secret.Token, // 兼容旧版本客户端
-	}))
 
 	// 认证接口（无需 JWT）
 	router.POST("/web/auth/login", web.Login)
@@ -47,6 +42,7 @@ func main() {
 	// 用户信息与改密（需 JWT）
 	jwtAuth.GET("/web/auth/me", web.GetMe)
 	jwtAuth.POST("/web/auth/change-password", web.ChangePassword)
+	jwtAuth.POST("/web/auth/verify-password", web.VerifyPassword)
 
 	// 用户管理（需 JWT + admin 角色）
 	adminGroup := jwtAuth.Group("/", middleware.RequireRole("admin"))
@@ -55,14 +51,17 @@ func main() {
 	adminGroup.PUT("/web/users/:id", web.UpdateUser)
 	adminGroup.DELETE("/web/users/:id", web.DeleteUser)
 
+	// 管理员或密码验证可操作的写接口
+	secureWrite := router.Group("/", middleware.AdminOrToken())
+
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "Hello World",
 		})
 	})
 
-	// 完整更新课表
-	authorized.PUT("/:school/:grade/:class", client.PutSchedule)
+	// 完整更新课表（兼容 BasicAuth 客户端）
+	secureWrite.PUT("/:school/:grade/:class", client.PutSchedule)
 	// 获取完整课表
 	router.GET("/:school/:grade/:class", client.GetSchedule)
 	// 通过省份和城市查询天气
@@ -74,48 +73,56 @@ func main() {
 	// WebSocket
 	router.Any("/ws/:school/:grade/:class_number", client.WebSocketPlaceholder)
 	// 广播
-	authorized.POST("/api/broadcast/:school/:grade/:class_number", client.BroadcastSyncConfig)
+	secureWrite.POST("/api/broadcast/:school/:grade/:class_number", client.BroadcastSyncConfig)
 
 	// 统计/菜单/结构
 	router.GET("/web/statistic", web.GetStatistic)
 	router.GET("/web/menu", web.GetMenu)
 	router.GET("/web/structure", web.GetStructure)
-	authorized.GET("/web/backup/export", web.ExportBackup)
-	authorized.POST("/web/backup/import", web.ImportBackup)
+	secureWrite.GET("/web/backup/export", web.ExportBackup)
+	secureWrite.POST("/web/backup/import", web.ImportBackup)
 	// 完整备份导出/导入（支持 overwrite/skip 模式）
-	authorized.POST("/web/backup/full-export", web.FullExportBackup)
-	authorized.POST("/web/backup/full-import", web.FullImportBackup)
+	secureWrite.POST("/web/backup/full-export", web.FullExportBackup)
+	secureWrite.POST("/web/backup/full-import", web.FullImportBackup)
+
+	// 学校/年级/班级管理
+	secureWrite.POST("/web/schools", web.CreateSchool)
+	secureWrite.DELETE("/web/schools/:school", web.DeleteSchool)
+	secureWrite.POST("/web/schools/:school/grades", web.CreateGrade)
+	secureWrite.DELETE("/web/schools/:school/grades/:grade", web.DeleteGrade)
+	secureWrite.POST("/web/schools/:school/grades/:grade/classes", web.CreateClass)
+	secureWrite.DELETE("/web/schools/:school/grades/:grade/classes/:class_number", web.DeleteClass)
 
 	// 配置接口
 	router.GET("/web/config/:school/:grade/subjects/options", web.GetSubjectsOptions)
 	router.GET("/web/config/:school/:grade/subjects", web.GetSubjects)
-	authorized.PUT("/web/config/:school/:grade/subjects", web.PutSubjects)
+	secureWrite.PUT("/web/config/:school/:grade/subjects", web.PutSubjects)
 
 	router.GET("/web/config/:school/:grade/timetable/options", web.GetTimetableOptions)
 	router.GET("/web/config/:school/:grade/timetable", web.GetTimetable)
-	authorized.PUT("/web/config/:school/:grade/timetable", web.PutTimetable)
+	secureWrite.PUT("/web/config/:school/:grade/timetable", web.PutTimetable)
 
 	router.GET("/web/config/:school/:grade/:class_number/schedule", web.GetScheduleConfig)
-	authorized.PUT("/web/config/:school/:grade/:class_number/schedule", web.PutScheduleConfig)
+	secureWrite.PUT("/web/config/:school/:grade/:class_number/schedule", web.PutScheduleConfig)
 
 	router.GET("/web/config/:school/:grade/:class_number/settings", web.GetSettings)
-	authorized.PUT("/web/config/:school/:grade/:class_number/settings", web.PutSettings)
-	authorized.POST("/web/config/copy", web.CopyConfig)
+	secureWrite.PUT("/web/config/:school/:grade/:class_number/settings", web.PutSettings)
+	secureWrite.POST("/web/config/copy", web.CopyConfig)
 
 	// 自动任务
 	router.GET("/web/autorun", web.GetAutorunStatus)
 	router.GET("/web/autorun/hash/:hashid", web.GetAutorunHashStatus)
-	authorized.DELETE("/web/autorun/:hashid", web.DeleteAutorunRecord)
-	authorized.PUT("/web/autorun/compensation", web.PutCompensationRule)
-	authorized.PUT("/web/autorun/timetable", web.PutTimetableRule)
-	authorized.PUT("/web/autorun/schedule", web.PutScheduleRule)
-	authorized.PUT("/web/autorun/all", web.PutAllRule)
+	secureWrite.DELETE("/web/autorun/:hashid", web.DeleteAutorunRecord)
+	secureWrite.PUT("/web/autorun/compensation", web.PutCompensationRule)
+	secureWrite.PUT("/web/autorun/timetable", web.PutTimetableRule)
+	secureWrite.PUT("/web/autorun/schedule", web.PutScheduleRule)
+	secureWrite.PUT("/web/autorun/all", web.PutAllRule)
 
 	// 倒数日配置
 	router.GET("/web/countdown", web.GetCountdownStatus)
 	router.GET("/web/countdown/:id", web.GetCountdownByID)
-	authorized.PUT("/web/countdown", web.PutCountdownRule)
-	authorized.DELETE("/web/countdown/:id", web.DeleteCountdownRecord)
+	secureWrite.PUT("/web/countdown", web.PutCountdownRule)
+	secureWrite.DELETE("/web/countdown/:id", web.DeleteCountdownRecord)
 
 	// 调休计算
 	router.GET("/web/autorun/compensation/holiday/:year/:month/:day", web.CompensationFromHoliday)

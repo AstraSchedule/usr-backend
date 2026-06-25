@@ -87,7 +87,7 @@ func UserScopeContains(user *dbTable.User, targetScope string) bool {
 	if user.Scope == "" {
 		return false
 	}
-	// scope 是前缀匹配：school_rw 匹配 "学校" 下所有，grade_rw 匹配 "学校/年级" 下所有
+	// scope 是前缀匹配：school_w 匹配 "学校" 下所有，grade_w 匹配 "学校/年级" 下所有
 	// 完全匹配或前缀匹配
 	if user.Scope == targetScope {
 		return true
@@ -108,11 +108,11 @@ func CheckScopePermission(user *dbTable.User, school, grade, class string) bool 
 		return true
 	}
 	switch user.Role {
-	case "school_rw":
+	case "school_w":
 		return user.Scope == school
-	case "grade_rw":
+	case "grade_w":
 		return user.Scope == school+"/"+grade
-	case "class_rw":
+	case "class_w":
 		return user.Scope == school+"/"+grade+"/"+class
 	default:
 		return false
@@ -125,11 +125,11 @@ func CheckGradePermission(user *dbTable.User, school, grade string) bool {
 		return true
 	}
 	switch user.Role {
-	case "school_rw":
+	case "school_w":
 		return user.Scope == school
-	case "grade_rw":
+	case "grade_w":
 		return user.Scope == school+"/"+grade
-	case "class_rw":
+	case "class_w":
 		return false
 	default:
 		return false
@@ -141,7 +141,7 @@ func CheckSchoolPermission(user *dbTable.User, school string) bool {
 	if user.Role == "admin" {
 		return true
 	}
-	if user.Role == "school_rw" {
+	if user.Role == "school_w" {
 		return user.Scope == school
 	}
 	return false

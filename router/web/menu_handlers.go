@@ -90,7 +90,14 @@ func listClasses(school, grade string) ([]string, error) {
 }
 
 func GetMenu(c *gin.Context) {
-	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}, {"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil}, {"to": "/tools", "text": "实用工具", "key": "tools", "children": nil}}}
+	menu := gin.H{"data": []gin.H{
+		{"to": "/", "text": "总览", "key": "go-back-home", "children": nil},
+		{"to": "/users", "text": "用户管理", "key": "users", "children": nil},
+		{"to": "/structure", "text": "结构管理", "key": "structure", "children": nil},
+		{"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil},
+		{"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil},
+		{"to": "/tools", "text": "实用工具", "key": "tools", "children": nil},
+	}}
 	data := menu["data"].([]gin.H)
 	schools, err := listSchools()
 	if err != nil {
