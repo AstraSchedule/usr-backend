@@ -75,7 +75,11 @@ func CreateGrade(c *gin.Context) {
 		School: school,
 		Grade:  req.Name,
 		SubjectConfig: dbTable.SubjectConfig{
-			SubjectName: map[string]string{"课": "课程"},
+			SubjectName: map[string]string{
+				"课": "课程", "自": "自习", "英": "英语", "语": "语文",
+				"数": "数学", "物": "物理", "化": "化学", "体": "体育",
+				"史": "历史", "政": "政治", "班": "班会",
+			},
 		},
 	}
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&subject)
@@ -85,8 +89,8 @@ func CreateGrade(c *gin.Context) {
 		Grade:  req.Name,
 		TimetableConfig: dbTable.TimetableConfig{
 			Timetable: map[string]map[string]interface{}{
-				"常日": {"00:00-00:00": 0, "00:01-23:59": "尽量不要在部署阶段修改"},
-				"没课": {"00:00-00:00": 0, "00:01-23:59": "没课"},
+				"常日": {"00:00-00:00": 0, "00:01-23:59": 1},
+				"没课": {"00:00-00:00": 0, "00:01-23:59": 0},
 			},
 			Divider: map[string][]int{"常日": {}, "没课": {}},
 			Start:   time.Now().Format("2006-01-02"),
@@ -152,6 +156,48 @@ func CreateClass(c *gin.Context) {
 		},
 	}
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&schedule)
+
+	// 创建默认客户端配置（含 CSS 变量）
+	clientConfig := dbTable.ClientConfig{
+		School: school,
+		Grade:  grade,
+		Class:  req.Name,
+		ClientConfigItems: dbTable.ClientConfigItems{
+			CountdownTarget:      "hidden",
+			WeatherAlertOverride: true,
+			WeatherAlertBrief:    true,
+			WeekDisplay:          true,
+			BannerText:           "",
+			CSSStyle: map[string]string{
+				"--center-font-size":       "30px",
+				"--corner-font-size":       "14px",
+				"--countdown-font-size":    "28px",
+				"--global-border-radius":   "16px",
+				"--global-bg-opacity":      "0.3",
+				"--container-bg-padding":   "8px 14px",
+				"--countdown-bg-padding":   "5px 12px",
+				"--container-space":        "16px",
+				"--top-space":              "16px",
+				"--main-horizontal-space":  "8px",
+				"--divider-width":          "2px",
+				"--divider-margin":         "6px",
+				"--triangle-size":          "16px",
+				"--sub-font-size":          "20px",
+				"--banner-height":          "30px",
+			},
+			TemperatureColors: dbTable.TemperatureColorsConfig{
+				UseGradient: false,
+				Stops: []dbTable.TemperatureStop{
+					{Temp: 20, Color: "#66CCFF"},
+					{Temp: 30, Color: "#5FBC21"},
+					{Temp: 36, Color: "#FF8C00"},
+					{Temp: 100, Color: "#EE0000"},
+				},
+			},
+			StartupBehavior: "normal",
+		},
+	}
+	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&clientConfig)
 
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "班级创建成功"})
 }
