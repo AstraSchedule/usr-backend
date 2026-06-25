@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   workflow_dispatch:
 
 jobs:
@@ -13,13 +12,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             goos: linux
             goarch: amd64
             artifact_name: AstraScheduleServerGo
             asset_name: AstraScheduleServerGo-linux-amd64
 
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             goos: linux
             goarch: arm64
             artifact_name: AstraScheduleServerGo
@@ -65,6 +64,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
         run: go build -o ${{ matrix.asset_name }}
 
       - name: Upload artifact
@@ -146,3 +146,43 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-fc:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download linux-amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AstraScheduleServerGo-linux-amd64
+          path: build_artifacts
+
+      - name: Package binary
+        run: |
+          cp build_artifacts/AstraScheduleServerGo-linux-amd64 build_artifacts/bootstrap
+          chmod 777 build_artifacts/bootstrap
+          cd build_artifacts
+          zip ../code.zip bootstrap
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure credentials
+        run: |
+          s config add \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access default
+
+      - name: Deploy to FC
+        env:
+          ASTRA_SECRET_TOKEN: ${{ secrets.ASTRA_SECRET_TOKEN }}
+          ASTRA_APIKEY_WEATHER: ${{ secrets.ASTRA_APIKEY_WEATHER }}
+          ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM: ${{ secrets.ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM }}
+        run: s deploy --function code -y

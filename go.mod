@@ -11,6 +11,7 @@ require (
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	github.com/libtnb/sqlite v1.1.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
