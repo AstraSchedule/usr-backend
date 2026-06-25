@@ -175,8 +175,8 @@ jobs:
       - name: Configure credentials
         run: |
           s config add \
-            --accessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
-            --accessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
             --access default
 
       - name: Deploy to FC
