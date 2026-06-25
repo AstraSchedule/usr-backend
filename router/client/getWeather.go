@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -143,9 +144,9 @@ func generateQWeatherJWT(cfg model.JWTAuthConfig) (string, error) {
 // buildCityLookupURL 构建城市查询 URL
 func buildCityLookupURL(name, adm, host string) string {
 	if adm != "" {
-		return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s&adm=%s", host, name, adm)
+		return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s&adm=%s", host, url.QueryEscape(name), url.QueryEscape(adm))
 	}
-	return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s", host, name)
+	return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s", host, url.QueryEscape(name))
 }
 
 // parseLocationResult 解析城市查询结果
@@ -203,7 +204,7 @@ func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.Location
 		return nil, fmt.Errorf("请求API失败: %w", err)
 	}
 	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d", url, resp.StatusCode())
+		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d\n%d", url, resp.StatusCode(), resp.String())
 	}
 
 	var result map[string]interface{}
@@ -225,7 +226,7 @@ func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.Location
 
 // weatherLookup 查询指定位置的天气信息
 func weatherLookup(location, host string, cfg model.APIKeyConfig) (*model.WeatherResp, error) {
-	url := fmt.Sprintf("https://%s/v7/weather/now?location=%s", host, location)
+	url := fmt.Sprintf("https://%s/v7/weather/now?location=%s", host, url.QueryEscape(location))
 
 	client := resty.New()
 	req, err := createQWeatherRequest(client, cfg)
@@ -268,7 +269,7 @@ func weatherLookupByName(name, adm, host string, cfg model.APIKeyConfig) (*model
 
 // weatherWarningLookup 查询指定位置的天气预警信息
 func weatherWarningLookup(lat, lon, host string, cfg model.APIKeyConfig) (*model.WarningResp, error) {
-	url := fmt.Sprintf("https://%s/weatheralert/v1/current/%s/%s", host, lat, lon)
+	url := fmt.Sprintf("https://%s/weatheralert/v1/current/%s/%s", host, url.PathEscape(lat), url.PathEscape(lon))
 
 	client := resty.New()
 	req, err := createQWeatherRequest(client, cfg)
