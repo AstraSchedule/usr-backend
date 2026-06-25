@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: golang:1.22-buster
 
     steps:
       - name: Checkout code
