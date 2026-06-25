@@ -117,7 +117,7 @@ jobs:
           ls -la release_files/
 
       - name: Create Release
-        uses: softprops/action-gh-release@718ea10f23eff684815f04b04d7c8e478dfdba89
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release ${{ steps.version.outputs.version }}
