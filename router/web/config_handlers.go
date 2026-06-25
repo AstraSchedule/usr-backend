@@ -114,6 +114,23 @@ func GetSubjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"abbr": abbr, "fullName": fullName})
 }
 
+// parseTextItems 从 JSON 数组中提取文本项
+func parseTextItems(arr []interface{}) []textItem {
+	var items []textItem
+	for _, item := range arr {
+		obj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		text, ok := obj["text"].(string)
+		if !ok {
+			continue
+		}
+		items = append(items, textItem{Text: text})
+	}
+	return items
+}
+
 func PutSubjects(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
@@ -127,25 +144,15 @@ func PutSubjects(c *gin.Context) {
 	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
 		bodyMap = modelVal
 	}
+
 	body := subjectsPayload{}
 	if arr, ok := bodyMap["abbr"].([]interface{}); ok {
-		for _, item := range arr {
-			if obj, ok := item.(map[string]interface{}); ok {
-				if text, ok := obj["text"].(string); ok {
-					body.Abbr = append(body.Abbr, textItem{Text: text})
-				}
-			}
-		}
+		body.Abbr = parseTextItems(arr)
 	}
 	if arr, ok := bodyMap["fullName"].([]interface{}); ok {
-		for _, item := range arr {
-			if obj, ok := item.(map[string]interface{}); ok {
-				if text, ok := obj["text"].(string); ok {
-					body.FullName = append(body.FullName, textItem{Text: text})
-				}
-			}
-		}
+		body.FullName = parseTextItems(arr)
 	}
+
 	m := map[string]string{}
 	limit := len(body.Abbr)
 	if len(body.FullName) < limit {
