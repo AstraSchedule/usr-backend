@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   workflow_dispatch:
 
 jobs:
@@ -146,3 +145,43 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-fc:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download linux-amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AstraScheduleServerGo-linux-amd64
+          path: build_artifacts
+
+      - name: Package binary
+        run: |
+          chmod +x build_artifacts/AstraScheduleServerGo-linux-amd64
+          cd build_artifacts
+          zip ../code.zip AstraScheduleServerGo-linux-amd64
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure credentials
+        run: |
+          s config add \
+            --accessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --accessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access default
+
+      - name: Deploy to FC
+        env:
+          ASTRA_SECRET_TOKEN: ${{ secrets.ASTRA_SECRET_TOKEN }}
+          ASTRA_APIKEY_APIHOST: ${{ secrets.ASTRA_APIKEY_APIHOST }}
+          ASTRA_APIKEY_WEATHER: ${{ secrets.ASTRA_APIKEY_WEATHER }}
+          ASTRA_SERVER_DOMAIN: ${{ secrets.ASTRA_SERVER_DOMAIN }}
+        run: s deploy --function code -y
