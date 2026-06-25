@@ -12,13 +12,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-20.04
             goos: linux
             goarch: amd64
             artifact_name: AstraScheduleServerGo
             asset_name: AstraScheduleServerGo-linux-amd64
 
-          - os: ubuntu-latest
+          - os: ubuntu-20.04
             goos: linux
             goarch: arm64
             artifact_name: AstraScheduleServerGo
@@ -166,7 +166,7 @@ jobs:
       - name: Package binary
         run: |
           cp build_artifacts/AstraScheduleServerGo-linux-amd64 build_artifacts/bootstrap
-          chmod +x build_artifacts/bootstrap
+          chmod 777 build_artifacts/bootstrap
           cd build_artifacts
           zip ../code.zip bootstrap
 
