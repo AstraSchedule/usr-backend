@@ -47,7 +47,6 @@ resources:
         PATH: >-
           /opt/Go1/bin:/usr/local/bin/apache-maven/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ruby/bin:/opt/bin:/code:/code/bin
         ASTRA_RUN_SERVERLESS: 'true'
-        TYPE_IS_ARMS: 'true'
         GIN_MODE: release
         TZ: Asia/Shanghai
         ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM: ${env('ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM')}
