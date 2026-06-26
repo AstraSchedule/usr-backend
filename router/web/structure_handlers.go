@@ -89,8 +89,8 @@ func CreateGrade(c *gin.Context) {
 		Grade:  req.Name,
 		TimetableConfig: dbTable.TimetableConfig{
 			Timetable: map[string]map[string]interface{}{
-				"常日": {"00:00-00:00": 0, "00:01-23:59": 1},
-				"没课": {"00:00-00:00": 0, "00:01-23:59": 0},
+				"常日": {"00:00-00:00": 0, "00:01-23:59": "常日"},
+				"没课": {"00:00-00:00": 0, "00:01-23:59": "没课"},
 			},
 			Divider: map[string][]int{"常日": {}, "没课": {}},
 			Start:   time.Now().Format("2006-01-02"),
@@ -146,13 +146,13 @@ func CreateClass(c *gin.Context) {
 		Grade:  grade,
 		Class:  req.Name,
 		DailyClasses: [7]dbTable.DailyClass{
-			{Chinese: "日", English: "SUN", Timetable: "没课"},
-			{Chinese: "一", English: "MON", Timetable: "常日"},
-			{Chinese: "二", English: "TUE", Timetable: "常日"},
-			{Chinese: "三", English: "WED", Timetable: "常日"},
-			{Chinese: "四", English: "THR", Timetable: "常日"},
-			{Chinese: "五", English: "FRI", Timetable: "常日"},
-			{Chinese: "六", English: "SAT", Timetable: "没课"},
+			{Chinese: "日", English: "SUN", Timetable: "没课", ClassList: dbTable.ClassList{[]string{"课"}}},
+			{Chinese: "一", English: "MON", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
+			{Chinese: "二", English: "TUE", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
+			{Chinese: "三", English: "WED", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
+			{Chinese: "四", English: "THR", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
+			{Chinese: "五", English: "FRI", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
+			{Chinese: "六", English: "SAT", Timetable: "没课", ClassList: dbTable.ClassList{[]string{"课"}}},
 		},
 	}
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&schedule)
