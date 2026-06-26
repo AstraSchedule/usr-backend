@@ -34,7 +34,25 @@ func validateDateField(c *gin.Context, fieldName string, value string) bool {
 
 func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
 	ns := middleware.GetNamespace(c)
+	claims := middleware.GetUserClaims(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
+		return
+	}
 	scope := parseScopeInput(payload.Scope)
+	// 校验作用域权限：非 admin 用户的操作范围不能超过自身 scope
+	if claims.Role != "admin" {
+		for _, s := range scope {
+			if s == "ALL" {
+				continue
+			}
+			if !db.CheckScopePermission(&dbTable.User{Role: claims.Role, Scope: claims.Scope}, s, "", "") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "无权操作该作用域"})
+				return
+			}
+		}
+	}
+
 	if hashID == "" {
 		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
 	}

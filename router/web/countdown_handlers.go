@@ -145,12 +145,30 @@ func GetCountdownByID(c *gin.Context) {
 
 func PutCountdownRule(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
+	claims := middleware.GetUserClaims(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "未认证"})
+		return
+	}
+
 	var payload countdownPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
 		return
 	}
 	scope := parseScopeInput(payload.Scope)
+	// 校验作用域权限
+	if claims.Role != "admin" {
+		for _, s := range scope {
+			if s == "ALL" {
+				continue
+			}
+			if !db.CheckScopePermission(&dbTable.User{Role: claims.Role, Scope: claims.Scope}, s, "", "") {
+				c.JSON(http.StatusForbidden, gin.H{"detail": "无权操作该作用域"})
+				return
+			}
+		}
+	}
 	schedules := normalizeCountdownSchedules(payload.Schedules)
 	if len(schedules) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "schedules 不能为空，且每项需要合法 name/date(YYYY-MM-DD)"})

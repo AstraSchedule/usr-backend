@@ -54,7 +54,7 @@ resources:
         TZ: Asia/Shanghai
         ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM: ${env('ASTRA_APIKEY_JWT_PRIVATE_KEY_PEM')}
         ASTRA_SECRET_TOKEN: ${env('ASTRA_SECRET_TOKEN')}
-        ASTRA_SERVER_DOMAIN: https://manager.khbit.cn,http://localhost:5173,https://kuohu.dev
+        ASTRA_SERVER_DOMAIN: https://i.getastra.cn
         ASTRA_APIKEY_JWT_PROJECT_ID: 49TNEK5VBV
         ASTRA_DB_TYPE: sqlite
         ASTRA_SERVER_PORT: '9000'
