@@ -22,9 +22,10 @@ func ListUsers(c *gin.Context) {
 			"id":              u.ID,
 			"username":        u.Username,
 			"role":            u.Role,
-			"scope":           u.Scope,
-			"must_change_pwd": u.MustChangePwd,
-			"created_at":      u.CreatedAt,
+			"scope":              u.Scope,
+			"must_change_pwd":    u.MustChangePwd,
+			"must_change_username": u.MustChangeUsername,
+			"created_at":         u.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -32,10 +33,12 @@ func ListUsers(c *gin.Context) {
 
 func CreateUser(c *gin.Context) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
-		Scope    string `json:"scope"`
+		Username          string `json:"username"`
+		Password          string `json:"password"`
+		Role              string `json:"role"`
+		Scope             string `json:"scope"`
+		MustChangePwd     *bool  `json:"must_change_pwd"`
+		MustChangeUsername *bool `json:"must_change_username"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数"})
@@ -65,11 +68,12 @@ func CreateUser(c *gin.Context) {
 	}
 
 	user := dbTable.User{
-		Username:      req.Username,
-		PasswordHash:  hash,
-		Role:          req.Role,
-		Scope:         req.Scope,
-		MustChangePwd: false,
+		Username:           req.Username,
+		PasswordHash:       hash,
+		Role:               req.Role,
+		Scope:              req.Scope,
+		MustChangePwd:      req.MustChangePwd != nil && *req.MustChangePwd,
+		MustChangeUsername: req.MustChangeUsername != nil && *req.MustChangeUsername,
 	}
 
 	if err := db.CreateUser(&user); err != nil {
@@ -103,10 +107,12 @@ func UpdateUser(c *gin.Context) {
 	}
 
 	var req struct {
-		Username *string `json:"username"`
-		Password *string `json:"password"`
-		Role     *string `json:"role"`
-		Scope    *string `json:"scope"`
+		Username           *string `json:"username"`
+		Password           *string `json:"password"`
+		Role               *string `json:"role"`
+		Scope              *string `json:"scope"`
+		MustChangePwd      *bool   `json:"must_change_pwd"`
+		MustChangeUsername *bool   `json:"must_change_username"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数"})
@@ -139,6 +145,12 @@ func UpdateUser(c *gin.Context) {
 	}
 	if req.Scope != nil {
 		user.Scope = *req.Scope
+	}
+	if req.MustChangePwd != nil {
+		user.MustChangePwd = *req.MustChangePwd
+	}
+	if req.MustChangeUsername != nil {
+		user.MustChangeUsername = *req.MustChangeUsername
 	}
 
 	if err := db.UpdateUser(user); err != nil {
