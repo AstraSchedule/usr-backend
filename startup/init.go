@@ -12,11 +12,11 @@ func StartInit() {
 	ReadConfig()
 	SetLog()
 	MigrateDb()
-	EnsureAdminUser()
+	EnsureAdminUser("default")
 }
 
-func EnsureAdminUser() {
-	count, err := db.CountUsers()
+func EnsureAdminUser(namespace string) {
+	count, err := db.CountUsers(namespace)
 	if err != nil {
 		logrus.Warnf("检查用户数量失败: %v", err)
 		return
@@ -32,11 +32,12 @@ func EnsureAdminUser() {
 	}
 
 	admin := &dbTable.User{
-		Username:      "admin",
-		PasswordHash:  hash,
-		Role:          "admin",
-		Scope:         "",
-		MustChangePwd: true,
+		Namespace:      namespace,
+		Username:       "admin",
+		PasswordHash:   hash,
+		Role:           "admin",
+		Scope:          "",
+		MustChangePwd:  true,
 	}
 
 	if err := db.CreateUser(admin); err != nil {
@@ -44,5 +45,5 @@ func EnsureAdminUser() {
 		return
 	}
 
-	logrus.Info("已创建默认管理员账户: admin/admin（首次登录需修改密码）")
+	logrus.Infof("已创建默认管理员账户: admin/admin（命名空间: %s，首次登录需修改密码）", namespace)
 }

@@ -20,7 +20,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	user, err := db.GetUserByUsername(req.Username)
+	user, err := db.GetUserByUsername(middleware.GetNamespace(c), req.Username)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "用户名或密码错误"})
 		return
@@ -33,7 +33,7 @@ func Login(c *gin.Context) {
 
 	token, err := service.GenerateToken(
 		model.Configs.Secret.Token,
-		user.ID, user.Username, user.Role, user.Scope,
+		user.ID, user.Namespace, user.Username, user.Role, user.Scope,
 		24,
 	)
 	if err != nil {

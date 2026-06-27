@@ -28,23 +28,25 @@ func CheckPassword(password, hash string) bool {
 
 // JWTClaims 自定义 JWT 载荷
 type JWTClaims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	Scope    string `json:"scope"`
+	UserID    uint   `json:"user_id"`
+	Namespace string `json:"namespace"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	Scope     string `json:"scope"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成 JWT 令牌
-func GenerateToken(secret string, userID uint, username, role, scope string, expiresHours int) (string, error) {
+func GenerateToken(secret string, userID uint, namespace, username, role, scope string, expiresHours int) (string, error) {
 	if expiresHours <= 0 {
 		expiresHours = 24
 	}
 	claims := JWTClaims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
-		Scope:    scope,
+		UserID:    userID,
+		Namespace: namespace,
+		Username:  username,
+		Role:      role,
+		Scope:     scope,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expiresHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

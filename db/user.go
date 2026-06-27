@@ -6,9 +6,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func GetUserByUsername(username string) (*dbTable.User, error) {
+func GetUserByUsername(namespace, username string) (*dbTable.User, error) {
 	user := &dbTable.User{}
-	err := GetDB().Where("username = ?", username).Take(user).Error
+	err := GetDB().Where("namespace = ? AND username = ?", namespace, username).Take(user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -24,9 +24,13 @@ func GetUserByID(id uint) (*dbTable.User, error) {
 	return user, nil
 }
 
-func ListUsers() ([]dbTable.User, error) {
+func ListUsers(namespace string) ([]dbTable.User, error) {
 	users := make([]dbTable.User, 0)
-	err := GetDB().Order("id ASC").Find(&users).Error
+	q := GetDB().Order("id ASC")
+	if namespace != "" {
+		q = q.Where("namespace = ?", namespace)
+	}
+	err := q.Find(&users).Error
 	return users, err
 }
 
@@ -43,18 +47,22 @@ func DeleteUser(id uint) (int64, error) {
 	return resp.RowsAffected, resp.Error
 }
 
-// UpsertUser 按 username upsert（启动时创建默认管理员用）
+// UpsertUser 按 namespace+username upsert（启动时创建默认管理员用）
 func UpsertUser(user *dbTable.User) error {
 	return GetDB().Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "username"}},
+		Columns:   []clause.Column{{Name: "namespace"}, {Name: "username"}},
 		DoNothing: true,
 	}).Create(user).Error
 }
 
-// CountUsers 返回用户总数
-func CountUsers() (int64, error) {
+// CountUsers 返回指定 namespace 的用户总数
+func CountUsers(namespace string) (int64, error) {
 	var count int64
-	err := GetDB().Model(&dbTable.User{}).Count(&count).Error
+	q := GetDB().Model(&dbTable.User{})
+	if namespace != "" {
+		q = q.Where("namespace = ?", namespace)
+	}
+	err := q.Count(&count).Error
 	return count, err
 }
 
@@ -68,8 +76,8 @@ func UpdatePassword(userID uint, hash string) error {
 }
 
 // EnsureAdminUser 确保至少存在一个管理员账户，若无用户则创建 admin/admin
-func EnsureAdminUser() {
-	count, err := CountUsers()
+func EnsureAdminUser(namespace string) {
+	count, err := CountUsers(namespace)
 	if err != nil {
 		return
 	}
@@ -87,12 +95,9 @@ func UserScopeContains(user *dbTable.User, targetScope string) bool {
 	if user.Scope == "" {
 		return false
 	}
-	// scope 是前缀匹配：school_w 匹配 "学校" 下所有，grade_w 匹配 "学校/年级" 下所有
-	// 完全匹配或前缀匹配
 	if user.Scope == targetScope {
 		return true
 	}
-	// 检查 user.Scope 是否是 targetScope 的前缀
 	if len(user.Scope) < len(targetScope) {
 		prefix := targetScope[:len(user.Scope)]
 		if prefix == user.Scope && targetScope[len(user.Scope)] == '/' {
