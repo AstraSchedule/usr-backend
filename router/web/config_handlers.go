@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/router/client"
 	"AstraScheduleServerGo/service"
@@ -88,9 +89,10 @@ func cloneDailyClasses(src [7]dbTable.DailyClass) [7]dbTable.DailyClass {
 }
 
 func GetSubjectsOptions(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
-	subject := db.GetSubject(school, grade)
+	subject := db.GetSubjectNs(ns, school, grade)
 	options := make([]gin.H, 0)
 	for abbr, full := range subject.SubjectName {
 		options = append(options, gin.H{"label": abbr + "（" + full + "）", "value": abbr})
@@ -99,9 +101,10 @@ func GetSubjectsOptions(c *gin.Context) {
 }
 
 func GetSubjects(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
-	subject := db.GetSubject(school, grade)
+	subject := db.GetSubjectNs(ns, school, grade)
 	abbr := make([]gin.H, 0)
 	fullName := make([]gin.H, 0)
 	for k, v := range subject.SubjectName {
@@ -129,6 +132,7 @@ func parseTextItems(arr []interface{}) []textItem {
 }
 
 func PutSubjects(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	var raw map[string]interface{}
@@ -157,9 +161,8 @@ func PutSubjects(c *gin.Context) {
 	for i := 0; i < limit; i++ {
 		m[body.Abbr[i].Text] = body.FullName[i].Text
 	}
-
-	record := dbTable.Subject{School: school, Grade: grade, SubjectConfig: dbTable.SubjectConfig{SubjectName: m}}
-	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
+	record := dbTable.Subject{Namespace: ns, School: school, Grade: grade, SubjectConfig: dbTable.SubjectConfig{SubjectName: m}}
+	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -167,9 +170,10 @@ func PutSubjects(c *gin.Context) {
 }
 
 func GetTimetableOptions(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
-	timetable := db.GetTimetable(school, grade)
+	timetable := db.GetTimetableNs(ns, school, grade)
 	options := make([]gin.H, 0)
 	keys := make([]string, 0, len(timetable.Timetable))
 	for name := range timetable.Timetable {
@@ -193,8 +197,8 @@ func GetTimetableOptions(c *gin.Context) {
 			if !ok {
 				continue
 			}
-			if i > need {
-				need = i
+			if i+1 > need {
+				need = i + 1
 			}
 		}
 		options = append(options, gin.H{"label": name, "value": name, "need": need})
@@ -203,13 +207,15 @@ func GetTimetableOptions(c *gin.Context) {
 }
 
 func GetTimetable(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
-	timetable := db.GetTimetable(school, grade)
+	timetable := db.GetTimetableNs(ns, school, grade)
 	c.JSON(http.StatusOK, timetable.TimetableConfig)
 }
 
 func PutTimetable(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	var body dbTable.TimetableConfig
@@ -222,12 +228,12 @@ func PutTimetable(c *gin.Context) {
 		return
 	}
 	if _, ok := body.Timetable["常日"]; !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不允许删除“常日”作息表，且必须包含“常日”"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不允许删除\"常日\"作息表，且必须包含\"常日\""})
 		return
 	}
 	syncTimetableDividerKeys(&body)
-	record := dbTable.Timetable{School: school, Grade: grade, TimetableConfig: body}
-	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
+	record := dbTable.Timetable{Namespace: ns, School: school, Grade: grade, TimetableConfig: body}
+	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -235,6 +241,7 @@ func PutTimetable(c *gin.Context) {
 }
 
 func CopyConfig(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	var payload copyConfigPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数: " + err.Error()})
@@ -256,7 +263,7 @@ func CopyConfig(c *gin.Context) {
 	dbConn := db.GetDB()
 
 	var srcSubject dbTable.Subject
-	if err := dbConn.Where("school = ? AND grade = ?", payload.From.School, payload.From.Grade).Take(&srcSubject).Error; err != nil {
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcSubject).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源科目配置"})
 			return
@@ -266,7 +273,7 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	var srcTimetable dbTable.Timetable
-	if err := dbConn.Where("school = ? AND grade = ?", payload.From.School, payload.From.Grade).Take(&srcTimetable).Error; err != nil {
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcTimetable).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源作息配置"})
 			return
@@ -276,7 +283,7 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	var srcSchedule dbTable.Schedule
-	if err := dbConn.Where("school = ? AND grade = ? AND class = ?", payload.From.School, payload.From.Grade, fromClass).Take(&srcSchedule).Error; err != nil {
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSchedule).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源课程表配置"})
 			return
@@ -286,7 +293,7 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	var srcSettings dbTable.ClientConfig
-	if err := dbConn.Where("school = ? AND grade = ? AND class = ?", payload.From.School, payload.From.Grade, fromClass).Take(&srcSettings).Error; err != nil {
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSettings).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源通用设置配置"})
 			return
@@ -296,16 +303,18 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	targetSubject := dbTable.Subject{
-		School: payload.To.School,
-		Grade:  payload.To.Grade,
+		Namespace: ns,
+		School:    payload.To.School,
+		Grade:     payload.To.Grade,
 		SubjectConfig: dbTable.SubjectConfig{
 			SubjectName: cloneStringMap(srcSubject.SubjectName),
 		},
 	}
 
 	targetTimetable := dbTable.Timetable{
-		School: payload.To.School,
-		Grade:  payload.To.Grade,
+		Namespace: ns,
+		School:    payload.To.School,
+		Grade:     payload.To.Grade,
 		TimetableConfig: dbTable.TimetableConfig{
 			Start:     srcTimetable.Start,
 			Timetable: cloneTimetableMap(srcTimetable.Timetable),
@@ -315,6 +324,7 @@ func CopyConfig(c *gin.Context) {
 	syncTimetableDividerKeys(&targetTimetable.TimetableConfig)
 
 	targetSchedule := dbTable.Schedule{
+		Namespace:    ns,
 		School:       payload.To.School,
 		Grade:        payload.To.Grade,
 		Class:        toClass,
@@ -322,9 +332,10 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	targetSettings := dbTable.ClientConfig{
-		School: payload.To.School,
-		Grade:  payload.To.Grade,
-		Class:  toClass,
+		Namespace: ns,
+		School:    payload.To.School,
+		Grade:     payload.To.Grade,
+		Class:     toClass,
 		ClientConfigItems: dbTable.ClientConfigItems{
 			CountdownTarget:      srcSettings.CountdownTarget,
 			WeatherAlertOverride: srcSettings.WeatherAlertOverride,
@@ -348,22 +359,22 @@ func CopyConfig(c *gin.Context) {
 		}
 	}()
 
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetSubject).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetSubject).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetTimetable).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetTimetable).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSchedule).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSchedule).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSettings).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSettings).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -391,11 +402,12 @@ func CopyConfig(c *gin.Context) {
 }
 
 func GetScheduleConfig(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
-	schedule := db.GetSchedule(school, grade, classNumber)
-	timetable := db.GetTimetable(school, grade)
+	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
+	timetable := db.GetTimetableNs(ns, school, grade)
 	maxSubjects := 0
 	for _, v := range timetable.Timetable {
 		for _, item := range v {
@@ -413,7 +425,6 @@ func GetScheduleConfig(c *gin.Context) {
 		}
 		classList := make([][]string, 0, len(day.ClassList))
 		for _, s := range day.ClassList {
-			// 直接使用数据库格式 [["物"], ["数"]] 或 [["物", "化"], ["数"]]
 			classList = append(classList, s)
 		}
 		for len(classList) < maxSubjects {
@@ -430,6 +441,7 @@ func GetScheduleConfig(c *gin.Context) {
 }
 
 func PutScheduleConfig(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
@@ -480,11 +492,11 @@ func PutScheduleConfig(c *gin.Context) {
 			Timetable: body.DailyClass[i].Timetable,
 		}
 	}
-	timetable := db.GetTimetable(school, grade)
+	timetable := db.GetTimetableNs(ns, school, grade)
 	service.FixWrongTimetable(&daily, timetable.Timetable)
 
-	record := dbTable.Schedule{School: school, Grade: grade, Class: classNumber, DailyClasses: daily}
-	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&record).Error; err != nil {
+	record := dbTable.Schedule{Namespace: ns, School: school, Grade: grade, Class: classNumber, DailyClasses: daily}
+	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -492,14 +504,16 @@ func PutScheduleConfig(c *gin.Context) {
 }
 
 func GetSettings(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
-	config := db.GetClientConfig(school, grade, classNumber)
+	config := db.GetClientConfigNs(ns, school, grade, classNumber)
 	c.JSON(http.StatusOK, config.ClientConfigItems)
 }
 
 func PutSettings(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
@@ -508,8 +522,8 @@ func PutSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	record := dbTable.ClientConfig{School: school, Grade: grade, Class: classNumber, ClientConfigItems: body}
-	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&record).Error; err != nil {
+	record := dbTable.ClientConfig{Namespace: ns, School: school, Grade: grade, Class: classNumber, ClientConfigItems: body}
+	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

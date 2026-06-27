@@ -2,6 +2,7 @@ package client
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/service"
@@ -14,6 +15,7 @@ import (
 )
 
 func GetSchedule(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	class := c.Param("class")
@@ -29,13 +31,13 @@ func GetSchedule(c *gin.Context) {
 		}
 		clientDataVersion = carbon.CreateFromTimestamp(cDVInt)
 	}
-	serverDataVersion := db.GetLatestVersion(school, grade, class)
+	serverDataVersion := db.GetLatestVersionNs(ns, school, grade, class)
 	if clientDataVersion.Eq(serverDataVersion) {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	clientConfig := db.GetClientConfig(school, grade, class)
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
+	clientConfig := db.GetClientConfigNs(ns, school, grade, class)
 
 	// 如果数据库中没有 temperature_colors 配置或 stops 为空，使用默认值
 	if len(clientConfig.TemperatureColors.Stops) == 0 {
@@ -49,10 +51,10 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	schedule := db.GetSchedule(school, grade, class)
-	subject := db.GetSubject(school, grade)
-	timetable := db.GetTimetable(school, grade)
-	records, _ := db.FetchAutorunRecords("")
+	schedule := db.GetScheduleNs(ns, school, grade, class)
+	subject := db.GetSubjectNs(ns, school, grade)
+	timetable := db.GetTimetableNs(ns, school, grade)
+	records, _ := db.FetchAutorunRecordsNs(ns, "")
 	resolvedDailyClasses := service.ApplyScheduleRules(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
@@ -83,7 +85,7 @@ func GetSchedule(c *gin.Context) {
 
 	// 获取并过滤倒数日记录
 	classID := school + "/" + grade + "/" + class
-	allCountdowns, _ := db.FetchCountdownRecords("")
+	allCountdowns, _ := db.FetchCountdownRecordsNs(ns, "")
 	filteredCountdowns := service.FilterCountdownByScope(allCountdowns, classID)
 
 	fullResponse := model.FullResponseConfig{

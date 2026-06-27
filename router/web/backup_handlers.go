@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"encoding/json"
 	"errors"
 	"mime/multipart"
@@ -18,7 +19,8 @@ import (
 const maxBackupImportSize = 50 << 20 // 50MB
 
 func ExportBackup(c *gin.Context) {
-	payload, err := db.ExportBackup()
+	ns := middleware.GetNamespace(c)
+	payload, err := db.ExportBackupNs(ns)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -52,7 +54,13 @@ func ImportBackup(c *gin.Context) {
 		return
 	}
 
-	result, err := db.ImportBackup(payload, "overwrite")
+	// 支持通过 query 参数或 form 字段指定目标命名空间
+	overrideNs := c.Query("namespace")
+	if overrideNs == "" {
+		overrideNs = c.PostForm("namespace")
+	}
+
+	result, err := db.ImportBackupNs(payload, "overwrite", overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -103,7 +111,8 @@ func parseBackupPayload(c *gin.Context) (*db.BackupPayload, error) {
 
 // FullExportBackup 完整备份导出（使用 BasicAuth 验证）
 func FullExportBackup(c *gin.Context) {
-	payload, err := db.ExportBackup()
+	ns := middleware.GetNamespace(c)
+	payload, err := db.ExportBackupNs(ns)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -145,7 +154,13 @@ func FullImportBackup(c *gin.Context) {
 		return
 	}
 
-	result, err := db.ImportBackup(payload, mode)
+	// 支持通过 query 参数或 form 字段指定目标命名空间
+	overrideNs := c.Query("namespace")
+	if overrideNs == "" {
+		overrideNs = c.PostForm("namespace")
+	}
+
+	result, err := db.ImportBackupNs(payload, mode, overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

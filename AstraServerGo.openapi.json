@@ -2,7 +2,7 @@
   "openapi": "3.0.1",
   "info": {
     "title": "AstraServerGo",
-    "description": "基于 `AstraScheduleServerGo` 源码生成的 OpenAPI 3.0 文档。\n\n- 共 41 个 API 端点，覆盖客户端课表、天气、WebSocket、管理后台配置、自动任务、倒数日、备份导入导出等功能。\n- 受 Gin BasicAuth 保护的接口使用 `basicAuth` 安全方案（用户名：`AstraSchedule` 或 `ElectronClassSchedule`）。\n- 部分接口返回结构是动态 JSON（`map[string]interface{}`），已尽量按实际行为建模。\n",
+    "description": "基于 `AstraScheduleServerGo` 源码生成的 OpenAPI 3.0 文档。\n\n- 共 55 个 API 端点，覆盖客户端课表、天气、WebSocket、管理后台认证、用户管理、学校/年级/班级管理、配置管理、自动任务、倒数日、备份导入导出等功能。\n- JWT 认证接口使用 `jwtAuth` 安全方案（通过 POST /web/auth/login 获取 Token）。\n- 写入接口同时支持 BasicAuth（兼容旧版客户端）和 JWT + 密码验证。\n- 部分接口返回结构是动态 JSON（`map[string]interface{}`），已尽量按实际行为建模。\n",
     "version": "1.1.0"
   },
   "tags": [
@@ -15,7 +15,10 @@
     { "name": "web-config", "description": "管理后台：配置管理（科目、作息、课表、设置、复制）" },
     { "name": "web-autorun", "description": "管理后台：自动任务与调休查询" },
     { "name": "web-schedule", "description": "管理后台：按日期查询课节" },
-    { "name": "web-countdown", "description": "管理后台：倒数日配置" }
+    { "name": "web-countdown", "description": "管理后台：倒数日配置" },
+    { "name": "web-auth", "description": "管理后台：认证（登录、用户信息、改密）" },
+    { "name": "web-users", "description": "管理后台：用户管理" },
+    { "name": "web-structure", "description": "管理后台：学校/年级/班级管理" }
   ],
   "paths": {
     "/": {
@@ -149,190 +152,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
-      }
-    },
-    "/api/weather/{name1}/{name2}": {
-      "get": {
-        "summary": "按省份/城市查询天气",
-        "description": "带 10 分钟内存缓存。",
-        "operationId": "getWeatherWithProvince",
-        "tags": ["weather"],
-        "parameters": [
-          {
-            "name": "name1", "in": "path", "description": "省份名", "required": true,
-            "schema": { "type": "string" }, "example": "北京"
-          },
-          {
-            "name": "name2", "in": "path", "description": "城市名", "required": true,
-            "schema": { "type": "string" }, "example": "北京"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "查询成功",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
-              }
-            }
-          },
-          "404": {
-            "description": "城市不存在",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
-              }
-            }
-          },
-          "502": {
-            "description": "天气 API 调用失败",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
-              }
-            }
-          }
-        },
-        "security": []
-      }
-    },
-    "/api/weather/{name1}": {
-      "get": {
-        "summary": "按城市查询天气",
-        "description": "带 10 分钟内存缓存。",
-        "operationId": "getWeatherWithCity",
-        "tags": ["weather"],
-        "parameters": [
-          {
-            "name": "name1", "in": "path", "description": "城市名", "required": true,
-            "schema": { "type": "string" }, "example": "北京"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "查询成功",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
-              }
-            }
-          },
-          "404": {
-            "description": "城市不存在",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
-              }
-            }
-          },
-          "502": {
-            "description": "天气 API 调用失败",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
-              }
-            }
-          }
-        },
-        "security": []
-      }
-    },
-    "/api/weather/": {
-      "get": {
-        "summary": "通过 Cloudflare 请求头查询天气",
-        "description": "通过 CF-IPCity / CF-Region 请求头自动定位查询天气。",
-        "operationId": "getWeatherWithCFHeader",
-        "tags": ["weather"],
-        "parameters": [
-          {
-            "name": "CF-IPCity", "in": "header", "description": "Cloudflare 城市头；缺失时返回 400",
-            "required": false,
-            "schema": { "type": "string" }
-          },
-          {
-            "name": "CF-Region", "in": "header", "description": "Cloudflare 省份头",
-            "required": false,
-            "schema": { "type": "string" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "查询成功",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherResponse" }
-              }
-            }
-          },
-          "400": {
-            "description": "缺少 CF 头",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
-              }
-            }
-          },
-          "404": {
-            "description": "城市不存在",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" }
-              }
-            }
-          },
-          "502": {
-            "description": "天气 API 调用失败",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
-              }
-            }
-          }
-        },
-        "security": []
-      }
-    },
-    "/ws/{school}/{grade}/{class_number}": {
-      "get": {
-        "summary": "建立 WebSocket 连接",
-        "description": "客户端通过 WebSocket 升级连接，服务端将连接注册到对应级部的广播组。实际使用 `router.Any`，这里按常见的 GET 升级握手记录。当 `run.serverless=true` 时返回 501。",
-        "operationId": "websocketConnect",
-        "tags": ["websocket"],
-        "parameters": [
-          {
-            "name": "school", "in": "path", "description": "学校标识", "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "name": "grade", "in": "path", "description": "年级", "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "name": "class_number", "in": "path", "description": "班级", "required": true,
-            "schema": { "type": "string" }
-          }
-        ],
-        "responses": {
-          "101": { "description": "协议升级成功（WebSocket）" },
-          "400": {
-            "description": "WebSocket 升级失败",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/DetailResponse" }
-              }
-            }
-          },
-          "501": {
-            "description": "WebSocket 功能已禁用（serverless 模式）",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/DetailResponse" }
-              }
-            }
-          }
-        },
-        "security": []
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/api/broadcast/{school}/{grade}/{class_number}": {
@@ -366,7 +186,7 @@
           },
           "401": { "description": "Basic Auth 认证失败" }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/statistic": {
@@ -481,7 +301,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/backup/import": {
@@ -533,7 +353,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/backup/full-export": {
@@ -562,7 +382,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/backup/full-import": {
@@ -615,7 +435,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/config/{school}/{grade}/subjects/options": {
@@ -750,7 +570,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/config/{school}/{grade}/timetable/options": {
@@ -876,7 +696,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/config/{school}/{grade}/{class_number}/schedule": {
@@ -1005,7 +825,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/config/{school}/{grade}/{class_number}/settings": {
@@ -1094,7 +914,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/config/copy": {
@@ -1155,7 +975,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun": {
@@ -1286,7 +1106,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun/compensation": {
@@ -1331,7 +1151,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun/timetable": {
@@ -1376,7 +1196,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun/schedule": {
@@ -1421,7 +1241,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun/all": {
@@ -1466,7 +1286,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/autorun/compensation/holiday/{year}/{month}/{day}": {
@@ -1707,7 +1527,7 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
       }
     },
     "/web/countdown/{id}": {
@@ -1799,7 +1619,642 @@
             }
           }
         },
-        "security": [{ "basicAuth": [] }]
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/auth/login": {
+      "post": {
+        "summary": "用户登录",
+        "description": "使用用户名和密码登录，返回 JWT Token。",
+        "operationId": "login",
+        "tags": ["web-auth"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["token", "must_change_pwd", "user"],
+                  "properties": {
+                    "token": { "type": "string", "description": "JWT Token" },
+                    "must_change_pwd": { "type": "boolean", "description": "是否需要修改密码" },
+                    "user": { "$ref": "#/components/schemas/UserInfo" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "用户名或密码错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/web/auth/me": {
+      "get": {
+        "summary": "获取当前用户信息",
+        "operationId": "getMe",
+        "tags": ["web-auth"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "用户信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserInfoFull" }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/auth/change-password": {
+      "post": {
+        "summary": "修改密码",
+        "operationId": "changePassword",
+        "tags": ["web-auth"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["old_password", "new_password"],
+                "properties": {
+                  "old_password": { "type": "string" },
+                  "new_password": { "type": "string", "minLength": 6 },
+                  "new_username": { "type": "string", "description": "可选；修改用户名（至少 3 位）" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "修改成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误（旧密码错误、新密码太短等）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/auth/verify-password": {
+      "post": {
+        "summary": "验证密码",
+        "description": "验证当前用户密码是否正确，用于敏感操作前的身份确认。",
+        "operationId": "verifyPassword",
+        "tags": ["web-auth"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["password"],
+                "properties": {
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "验证通过",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "密码错误或未认证",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/users": {
+      "get": {
+        "summary": "获取用户列表",
+        "operationId": "listUsers",
+        "tags": ["web-users"],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "用户列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/UserInfoFull" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      },
+      "post": {
+        "summary": "创建用户",
+        "operationId": "createUser",
+        "tags": ["web-users"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password", "role"],
+                "properties": {
+                  "username": { "type": "string", "minLength": 3 },
+                  "password": { "type": "string", "minLength": 6 },
+                  "role": { "type": "string", "enum": ["admin", "school_w", "grade_w", "class_w", "readonly"] },
+                  "scope": { "type": "string", "description": "作用域，格式 school/grade/class" },
+                  "must_change_pwd": { "type": "boolean", "description": "是否强制修改密码" },
+                  "must_change_username": { "type": "boolean", "description": "是否强制修改用户名" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "user"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "user": { "$ref": "#/components/schemas/UserInfo" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "未认证或无 admin 权限" },
+          "409": {
+            "description": "用户名已存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/users/{id}": {
+      "put": {
+        "summary": "更新用户",
+        "operationId": "updateUser",
+        "tags": ["web-users"],
+        "parameters": [
+          {
+            "name": "id", "in": "path", "description": "用户 ID", "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string", "minLength": 6 },
+                  "role": { "type": "string", "enum": ["admin", "school_w", "grade_w", "class_w", "readonly"] },
+                  "scope": { "type": "string" },
+                  "must_change_pwd": { "type": "boolean" },
+                  "must_change_username": { "type": "boolean" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "user"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "user": { "$ref": "#/components/schemas/UserInfo" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "未认证或无 admin 权限" },
+          "404": {
+            "description": "用户不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      },
+      "delete": {
+        "summary": "删除用户",
+        "operationId": "deleteUser",
+        "tags": ["web-users"],
+        "parameters": [
+          {
+            "name": "id", "in": "path", "description": "用户 ID", "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "deleted"],
+                  "properties": {
+                    "status": { "type": "integer", "example": 200 },
+                    "deleted": { "type": "integer", "format": "int64" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "未认证或无 admin 权限" },
+          "404": {
+            "description": "用户不存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools": {
+      "post": {
+        "summary": "创建学校",
+        "operationId": "createSchool",
+        "tags": ["web-structure"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "未认证" },
+          "409": {
+            "description": "学校已存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools/{school}": {
+      "delete": {
+        "summary": "删除学校",
+        "operationId": "deleteSchool",
+        "tags": ["web-structure"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "401": { "description": "未认证" }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools/{school}/grades": {
+      "post": {
+        "summary": "创建年级",
+        "description": "创建年级并自动生成默认科目和作息表。",
+        "operationId": "createGrade",
+        "tags": ["web-structure"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "未认证" },
+          "409": {
+            "description": "年级已存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools/{school}/grades/{grade}": {
+      "delete": {
+        "summary": "删除年级",
+        "operationId": "deleteGrade",
+        "tags": ["web-structure"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "401": { "description": "未认证" }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools/{school}/grades/{grade}/classes": {
+      "post": {
+        "summary": "创建班级",
+        "description": "创建班级并自动生成默认课表和客户端配置。",
+        "operationId": "createClass",
+        "tags": ["web-structure"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "未认证" },
+          "409": {
+            "description": "班级已存在",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/web/schools/{school}/grades/{grade}/classes/{class_number}": {
+      "delete": {
+        "summary": "删除班级",
+        "operationId": "deleteClass",
+        "tags": ["web-structure"],
+        "parameters": [
+          {
+            "name": "school", "in": "path", "description": "学校标识", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "grade", "in": "path", "description": "年级", "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "class_number", "in": "path", "description": "班级", "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status200Message" }
+              }
+            }
+          },
+          "401": { "description": "未认证" }
+        },
+        "security": [{ "jwtAuth": [] }]
       }
     }
   },
@@ -1908,6 +2363,9 @@
             "enum": ["exit", "stay", "normal"],
             "default": "normal",
             "description": "应用启动行为：exit-退出, stay-滞留(不显示UI), normal-正常显示"
+          },
+          "temperature_colors": {
+            "$ref": "#/components/schemas/TemperatureColorsConfig"
           }
         }
       },
@@ -2368,6 +2826,9 @@
             "type": "string",
             "enum": ["exit", "stay", "normal"],
             "default": "normal"
+          },
+          "temperature_colors": {
+            "$ref": "#/components/schemas/TemperatureColorsConfig"
           }
         }
       },
@@ -2484,6 +2945,35 @@
           "status": { "type": "integer", "example": 200 }
         }
       },
+      "Status200Message": {
+        "type": "object",
+        "required": ["status", "message"],
+        "properties": {
+          "status": { "type": "integer", "example": 200 },
+          "message": { "type": "string" }
+        }
+      },
+      "UserInfo": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "username": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "school_w", "grade_w", "class_w", "readonly"] },
+          "scope": { "type": "string" }
+        }
+      },
+      "UserInfoFull": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "username": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "school_w", "grade_w", "class_w", "readonly"] },
+          "scope": { "type": "string" },
+          "must_change_pwd": { "type": "boolean" },
+          "must_change_username": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
       "AutorunPutSuccess": {
         "type": "object",
         "required": ["status", "id"],
@@ -2491,17 +2981,39 @@
           "status": { "type": "integer", "example": 200 },
           "id": { "type": "string" }
         }
+      },
+      "TemperatureColorsConfig": {
+        "type": "object",
+        "description": "温度颜色配置",
+        "properties": {
+          "use_gradient": { "type": "boolean", "default": false, "description": "是否使用渐变色" },
+          "stops": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TemperatureStop" },
+            "description": "温度-颜色断点列表"
+          }
+        }
+      },
+      "TemperatureStop": {
+        "type": "object",
+        "required": ["temp", "color"],
+        "properties": {
+          "temp": { "type": "number", "description": "温度阈值" },
+          "color": { "type": "string", "description": "对应颜色（HEX）" }
+        }
       }
     },
     "securitySchemes": {
       "basicAuth": {
         "type": "http",
         "scheme": "basic",
-        "description": "用户名：`AstraSchedule` 或 `ElectronClassSchedule`\n密码：配置文件 `secret.token`"
+        "description": "（已废弃，仅供旧版客户端兼容）用户名：`AstraSchedule` 或 `ElectronClassSchedule`，密码：配置文件 `secret.token`"
       },
-      "基本鉴权": {
+      "jwtAuth": {
         "type": "http",
-        "scheme": "basic"
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT Token，通过 POST /web/auth/login 获取。写入接口还需在 X-Verify-Password 头中提供密码。"
       }
     }
   },

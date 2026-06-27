@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/service"
 	"fmt"
 	"net/http"
@@ -87,6 +88,7 @@ func CompensationFromYear(c *gin.Context) {
 }
 
 func GetScheduleByDate(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
 	dateStr := c.Query("date")
 	scope := c.Query("scope")
 	dateObj, err := time.Parse(dateFormat, dateStr)
@@ -99,10 +101,10 @@ func GetScheduleByDate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的 scope 或配置缺失"})
 		return
 	}
-	schedule := db.GetSchedule(school, grade, classNumber)
-	timetable := db.GetTimetable(school, grade)
-	_, _ = db.RefreshAutorunStatuses(time.Now())
-	records, _ := db.FetchAutorunRecords("")
+	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
+	timetable := db.GetTimetableNs(ns, school, grade)
+	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
+	records, _ := db.FetchAutorunRecordsNs(ns, "")
 	resolved := service.ApplyScheduleRules(schedule.DailyClasses, timetable.Timetable, records, school, grade, classNumber, dateObj)
 	periods := service.BuildPeriodsForDate(resolved, timetable.Timetable, dateObj)
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"periods": periods}})
