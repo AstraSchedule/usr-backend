@@ -133,6 +133,9 @@ func main() {
 	// 按日期出课节
 	router.GET("/web/schedule/by-date", web.GetScheduleByDate)
 
+	// Admin: DROP table (仅内部调用，需 BasicAuth + password 验证)
+	secureWrite.DELETE("/web/admin/drop-table/:table", web.DropAstraTable)
+
 	err := router.Run(fmt.Sprintf("%s:%d", model.Configs.Server.Host, model.Configs.Server.Port))
 	if err != nil {
 		logrus.Fatal(err.Error())
