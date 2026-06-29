@@ -18,6 +18,7 @@
     { "name": "web-countdown", "description": "管理后台：倒数日配置" },
     { "name": "web-auth", "description": "管理后台：认证（登录、用户信息、改密）" },
     { "name": "web-users", "description": "管理后台：用户管理" },
+    { "name": "web-admin", "description": "管理后台：系统管理（DROP 表）" },
     { "name": "web-structure", "description": "管理后台：学校/年级/班级管理" }
   ],
   "paths": {
@@ -2255,6 +2256,92 @@
           "401": { "description": "未认证" }
         },
         "security": [{ "jwtAuth": [] }]
+      }
+    },
+    "/api/weather/{name1}/{name2}": {
+      "get": {
+        "summary": "按省份/城市查询天气",
+        "description": "带 10 分钟内存缓存。",
+        "operationId": "getWeatherWithProvince",
+        "tags": ["weather"],
+        "parameters": [
+          { "name": "name1", "in": "path", "description": "省份名", "required": true, "schema": { "type": "string" }, "example": "北京" },
+          { "name": "name2", "in": "path", "description": "城市名", "required": true, "schema": { "type": "string" }, "example": "北京" }
+        ],
+        "responses": {
+          "200": { "description": "查询成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherResponse" } } } },
+          "404": { "description": "城市不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" } } } },
+          "502": { "description": "天气 API 调用失败", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } }
+        },
+        "security": []
+      }
+    },
+    "/api/weather/{name1}": {
+      "get": {
+        "summary": "按城市查询天气",
+        "description": "带 10 分钟内存缓存。",
+        "operationId": "getWeatherWithCity",
+        "tags": ["weather"],
+        "parameters": [
+          { "name": "name1", "in": "path", "description": "城市名", "required": true, "schema": { "type": "string" }, "example": "北京" }
+        ],
+        "responses": {
+          "200": { "description": "查询成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherResponse" } } } },
+          "404": { "description": "城市不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" } } } },
+          "502": { "description": "天气 API 调用失败", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } }
+        },
+        "security": []
+      }
+    },
+    "/api/weather/": {
+      "get": {
+        "summary": "通过 Cloudflare 请求头查询天气",
+        "description": "通过 CF-IPCity / CF-Region 请求头自动定位查询天气。",
+        "operationId": "getWeatherWithCFHeader",
+        "tags": ["weather"],
+        "parameters": [
+          { "name": "CF-IPCity", "in": "header", "description": "Cloudflare 城市头", "required": false, "schema": { "type": "string" } },
+          { "name": "CF-Region", "in": "header", "description": "Cloudflare 省份头", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "查询成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherResponse" } } } },
+          "400": { "description": "缺少 CF 头", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } },
+          "404": { "description": "城市不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" } } } },
+          "502": { "description": "天气 API 调用失败", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } }
+        },
+        "security": []
+      }
+    },
+    "/ws/{school}/{grade}/{class_number}": {
+      "get": {
+        "summary": "建立 WebSocket 连接",
+        "operationId": "websocketConnect",
+        "tags": ["websocket"],
+        "parameters": [
+          { "name": "school", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "grade", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "class_number", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "101": { "description": "协议升级成功（WebSocket）" },
+          "501": { "description": "WebSocket 功能已禁用（serverless 模式）" }
+        },
+        "security": []
+      }
+    },
+    "/web/admin/drop-table/{table}": {
+      "delete": {
+        "summary": "删除并重建单表",
+        "operationId": "dropAstraTable",
+        "tags": ["web-admin"],
+        "parameters": [
+          { "name": "table", "in": "path", "required": true, "schema": { "type": "string" }, "description": "表名" }
+        ],
+        "responses": {
+          "200": { "description": "删除并重建成功" },
+          "400": { "description": "表不存在或不允许删除" }
+        },
+        "security": [{ "basicAuth": [] }]
       }
     }
   },
