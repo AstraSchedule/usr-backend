@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -34,14 +35,25 @@ func ParseHostToNamespace(host string) string {
 }
 
 // GetNamespace 从 gin.Context 获取当前请求的命名空间
+// release 模式下，如果 namespace 为空或 default，返回空字符串
 func GetNamespace(c *gin.Context) string {
 	ns, ok := c.Get(NamespaceKey)
-	if !ok {
+	if !ok || ns == "" {
+		if os.Getenv("GIN_MODE") == "release" {
+			return ""
+		}
 		return "default"
 	}
 	s, ok := ns.(string)
 	if !ok || s == "" {
+		if os.Getenv("GIN_MODE") == "release" {
+			return ""
+		}
 		return "default"
+	}
+	// release 模式下禁止 default namespace
+	if os.Getenv("GIN_MODE") == "release" && s == "default" {
+		return ""
 	}
 	return s
 }
@@ -50,8 +62,14 @@ func GetNamespace(c *gin.Context) string {
 func NamespaceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ns := ParseHostToNamespace(c.Request.Host)
+		// release 模式下，localhost/IP 请求不设置 namespace
+		if os.Getenv("GIN_MODE") == "release" && ns == "default" {
+			ns = ""
+		}
 		c.Set(NamespaceKey, ns)
-		logrus.Debugf("请求命名空间: %s (host=%s)", ns, c.Request.Host)
+		if ns != "" {
+			logrus.Debugf("请求命名空间: %s (host=%s)", ns, c.Request.Host)
+		}
 		c.Next()
 	}
 }
