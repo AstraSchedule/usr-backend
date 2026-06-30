@@ -204,7 +204,7 @@ func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.Location
 		return nil, fmt.Errorf("请求API失败: %w", err)
 	}
 	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d\n%d", url, resp.StatusCode(), resp.String())
+		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d\n%s", url, resp.StatusCode(), resp.String())
 	}
 
 	var result map[string]interface{}
