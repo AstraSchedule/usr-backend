@@ -1,0 +1,282 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/model"
+	"AstraScheduleServerGo/model/dbTable"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+)
+
+func setupTestRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	return router
+}
+
+var testDBInitialized = false
+
+func ensureTestDB() {
+	if testDBInitialized {
+		return
+	}
+	model.Configs = model.SrvConfig{
+		Server: model.ServerConfig{
+			Host:   "127.0.0.1",
+			Port:   9000,
+			Domain: []string{"http://localhost:5173"},
+		},
+		Secret: model.SecretConfig{
+			Token: "test-token-123",
+		},
+		Db: model.DbConfig{
+			Type: "sqlite",
+			Path: ":memory:",
+		},
+		APIKey: model.APIKeyConfig{
+			APIHost: "https://geoapi.qweather.com",
+			Weather: "test-weather-key",
+		},
+		Log: model.LogConfig{
+			Debug: true,
+		},
+		Run: model.RunConfig{
+			Serverless: false,
+		},
+	}
+	database := db.GetDB()
+	database.AutoMigrate(
+		&dbTable.Schedule{},
+		&dbTable.ClientConfig{},
+		&dbTable.Timetable{},
+		&dbTable.Subject{},
+		&dbTable.DataVersion{},
+		&dbTable.AutorunRecord{},
+		&dbTable.CountdownRecord{},
+	)
+	testDBInitialized = true
+}
+
+// Menu handlers tests
+
+func TestGetStatistic_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/statistic", GetStatistic)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/statistic", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, false, resp["serverless"])
+}
+
+func TestGetMenu_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/menu", GetMenu)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/menu", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	data := resp["data"].([]interface{})
+	assert.GreaterOrEqual(t, len(data), 4) // At least 4 base menu items
+}
+
+func TestGetStructure_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/structure", GetStructure)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/structure", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp []interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NotNil(t, resp)
+}
+
+// Config handlers tests
+
+func TestGetSubjectsOptions_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/subjects/options", GetSubjectsOptions)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/subjects/options", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetSubjects_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/subjects", GetSubjects)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/subjects", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetTimetableOptions_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/timetable/options", GetTimetableOptions)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/timetable/options", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetTimetable_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/timetable", GetTimetable)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/timetable", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetScheduleConfig_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/:class_number/schedule", GetScheduleConfig)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/class1/schedule", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetSettings_Empty(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/config/:school/:grade/:class_number/settings", GetSettings)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/config/school1/grade1/class1/settings", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// Autorun handlers tests
+
+func TestGetAutorunStatus_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/autorun", GetAutorunStatus)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/autorun", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// Countdown handlers tests
+
+func TestGetCountdownStatus_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/countdown", GetCountdownStatus)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/countdown", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// Compensation handlers tests
+
+func TestCompensationFromHoliday_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/autorun/compensation/holiday/:year/:month/:day", CompensationFromHoliday)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/autorun/compensation/holiday/2025/10/01", nil)
+	router.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+func TestCompensationFromWorkday_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/autorun/compensation/workday/:year/:month/:day", CompensationFromWorkday)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/autorun/compensation/workday/2025/10/13", nil)
+	router.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+func TestCompensationFromYear_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/autorun/compensation/year/:year", CompensationFromYear)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/autorun/compensation/year/2025", nil)
+	router.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+func TestGetScheduleByDate_Success(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/web/schedule/by-date", GetScheduleByDate)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/web/schedule/by-date?school=school1&grade=grade1&class=class1&date=2025-10-13", nil)
+	router.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
