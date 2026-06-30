@@ -53,6 +53,7 @@ func ensureTestDB() {
 	}
 	database := db.GetDB()
 	database.AutoMigrate(
+		&dbTable.User{},
 		&dbTable.Schedule{},
 		&dbTable.ClientConfig{},
 		&dbTable.Timetable{},
