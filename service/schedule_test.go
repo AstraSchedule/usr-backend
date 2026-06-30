@@ -9,54 +9,52 @@ import (
 )
 
 func TestCalcWeekNumber_EmptyStartDate(t *testing.T) {
-	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.Local)
+	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.UTC)
 	result := CalcWeekNumber("", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_InvalidDate(t *testing.T) {
-	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.Local)
+	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.UTC)
 	result := CalcWeekNumber("invalid-date", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_FirstWeek(t *testing.T) {
-	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
+	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
 	now := start.Add(3 * 24 * time.Hour) // 3 days later
 	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_SecondWeek(t *testing.T) {
-	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
+	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
 	now := start.Add(8 * 24 * time.Hour) // 8 days later
 	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 2, result)
 }
 
 func TestCalcWeekNumber_FifthWeek(t *testing.T) {
-	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
+	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
 	now := start.Add(35 * 24 * time.Hour) // 35 days later
 	result := CalcWeekNumber("2025-09-01", now)
-	// 35/7 = 5, function returns days/7 + 1 = 6, but actual is 5
-	// The function uses int division: 35/7 = 5 exactly
-	assert.Equal(t, 5, result)
+	// days/7 + 1 = 35/7 + 1 = 5 + 1 = 6
+	assert.Equal(t, 6, result)
 }
 
 func TestCalcWeekNumber_BeforeStartDate(t *testing.T) {
-	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
+	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
 	now := start.Add(-3 * 24 * time.Hour) // 3 days before
 	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_ExactSevenDays(t *testing.T) {
-	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
+	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
 	now := start.Add(7 * 24 * time.Hour) // exactly 7 days
 	result := CalcWeekNumber("2025-09-01", now)
-	// 7/7 = 1, function returns 1+1=2, but actual is 1
-	// The function uses int division: 7/7 = 1 exactly
-	assert.Equal(t, 1, result)
+	// days/7 + 1 = 7/7 + 1 = 1 + 1 = 2
+	assert.Equal(t, 2, result)
 }
 
 func TestResolveClassList_Empty(t *testing.T) {
