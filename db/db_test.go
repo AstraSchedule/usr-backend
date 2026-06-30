@@ -1,10 +1,8 @@
-package test
+package db
 
 import (
-	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
-	"AstraScheduleServerGo/startup"
 	"os"
 	"testing"
 	"time"
@@ -45,8 +43,16 @@ func TestMain(m *testing.M) {
 	}
 
 	// Initialize the database connection and create tables
-	db.GetDB()
-	startup.MigrateDb()
+	database := GetDB()
+	database.AutoMigrate(
+		&dbTable.Schedule{},
+		&dbTable.ClientConfig{},
+		&dbTable.Timetable{},
+		&dbTable.Subject{},
+		&dbTable.DataVersion{},
+		&dbTable.AutorunRecord{},
+		&dbTable.CountdownRecord{},
+	)
 
 	os.Exit(m.Run())
 }
@@ -73,7 +79,7 @@ func setupDBSingleton(t *testing.T) *gorm.DB {
 }
 
 func TestGetSchedule_Found(t *testing.T) {
-	database := db.GetDB()
+	database := GetDB()
 	schedule := &dbTable.Schedule{
 		School: "school1",
 		Grade:  "grade1",
@@ -84,21 +90,21 @@ func TestGetSchedule_Found(t *testing.T) {
 	}
 	database.Save(schedule)
 
-	result := db.GetSchedule("school1", "grade1", "class1")
+	result := GetSchedule("school1", "grade1", "class1")
 	assert.NotNil(t, result)
 	assert.Equal(t, "school1", result.School)
 	assert.Equal(t, "常日", result.DailyClasses[0].Timetable)
 }
 
 func TestGetSchedule_NotFound(t *testing.T) {
-	result := db.GetSchedule("nonexistent", "grade", "class")
+	result := GetSchedule("nonexistent", "grade", "class")
 	assert.NotNil(t, result)
 	// GORM returns empty struct, not nil
 	assert.Equal(t, "", result.School)
 }
 
 func TestGetSubject_Found(t *testing.T) {
-	database := db.GetDB()
+	database := GetDB()
 	subject := &dbTable.Subject{
 		School: "school1",
 		Grade:  "grade1",
@@ -110,13 +116,13 @@ func TestGetSubject_Found(t *testing.T) {
 	}
 	database.Save(subject)
 
-	result := db.GetSubject("school1", "grade1")
+	result := GetSubject("school1", "grade1")
 	assert.NotNil(t, result)
 	assert.Equal(t, "数学", result.SubjectName["数"])
 }
 
 func TestGetTimetable_Found(t *testing.T) {
-	database := db.GetDB()
+	database := GetDB()
 	timetable := &dbTable.Timetable{
 		School: "school1",
 		Grade:  "grade1",
@@ -128,13 +134,13 @@ func TestGetTimetable_Found(t *testing.T) {
 	}
 	database.Save(timetable)
 
-	result := db.GetTimetable("school1", "grade1")
+	result := GetTimetable("school1", "grade1")
 	assert.NotNil(t, result)
 	assert.Contains(t, result.Timetable, "常日")
 }
 
 func TestGetClientConfig_Found(t *testing.T) {
-	database := db.GetDB()
+	database := GetDB()
 	config := &dbTable.ClientConfig{
 		School: "school1",
 		Grade:  "grade1",
@@ -142,13 +148,13 @@ func TestGetClientConfig_Found(t *testing.T) {
 	}
 	database.Save(config)
 
-	result := db.GetClientConfig("school1", "grade1", "class1")
+	result := GetClientConfig("school1", "grade1", "class1")
 	assert.NotNil(t, result)
 	assert.Equal(t, "school1", result.School)
 }
 
 func TestGetLatestVersion_Found(t *testing.T) {
-	database := db.GetDB()
+	database := GetDB()
 	now := time.Now()
 	version := &dbTable.DataVersion{
 		School:  "school1",
@@ -158,7 +164,7 @@ func TestGetLatestVersion_Found(t *testing.T) {
 	}
 	database.Save(version)
 
-	result := db.GetLatestVersion("school1", "grade1", "class1")
+	result := GetLatestVersion("school1", "grade1", "class1")
 	assert.NotNil(t, result)
 }
 
@@ -184,10 +190,10 @@ func TestUpsertAndFetchAutorunRecord(t *testing.T) {
 		Status: 0,
 	}
 
-	err := db.UpsertAutorunRecord(record)
+	err := UpsertAutorunRecord(record)
 	assert.NoError(t, err)
 
-	records, err := db.FetchAutorunRecords("")
+	records, err := FetchAutorunRecords("")
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, len(records), 1)
 }
@@ -205,9 +211,9 @@ func TestDeleteAutorunRecord(t *testing.T) {
 		},
 		Level: 1,
 	}
-	db.UpsertAutorunRecord(record)
+	UpsertAutorunRecord(record)
 
-	count, err := db.DeleteAutorunRecord("hash-delete")
+	count, err := DeleteAutorunRecord("hash-delete")
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
@@ -224,10 +230,10 @@ func TestUpsertAndFetchCountdownRecord(t *testing.T) {
 		},
 	}
 
-	err := db.UpsertCountdownRecord(record)
+	err := UpsertCountdownRecord(record)
 	assert.NoError(t, err)
 
-	records, err := db.FetchCountdownRecords("")
+	records, err := FetchCountdownRecords("")
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, len(records), 1)
 }
@@ -243,9 +249,9 @@ func TestDeleteCountdownRecord(t *testing.T) {
 			{Name: "运动会", Date: "2025-11-01", Priority: 1},
 		},
 	}
-	db.UpsertCountdownRecord(record)
+	UpsertCountdownRecord(record)
 
-	count, err := db.DeleteCountdownRecord("countdown-delete")
+	count, err := DeleteCountdownRecord("countdown-delete")
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }

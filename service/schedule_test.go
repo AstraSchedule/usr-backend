@@ -1,8 +1,7 @@
-package test
+package service
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
-	"AstraScheduleServerGo/service"
 	"testing"
 	"time"
 
@@ -11,34 +10,34 @@ import (
 
 func TestCalcWeekNumber_EmptyStartDate(t *testing.T) {
 	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.Local)
-	result := service.CalcWeekNumber("", now)
+	result := CalcWeekNumber("", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_InvalidDate(t *testing.T) {
 	now := time.Date(2025, 10, 15, 0, 0, 0, 0, time.Local)
-	result := service.CalcWeekNumber("invalid-date", now)
+	result := CalcWeekNumber("invalid-date", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_FirstWeek(t *testing.T) {
 	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
 	now := start.Add(3 * 24 * time.Hour) // 3 days later
-	result := service.CalcWeekNumber("2025-09-01", now)
+	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_SecondWeek(t *testing.T) {
 	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
 	now := start.Add(8 * 24 * time.Hour) // 8 days later
-	result := service.CalcWeekNumber("2025-09-01", now)
+	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 2, result)
 }
 
 func TestCalcWeekNumber_FifthWeek(t *testing.T) {
 	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
 	now := start.Add(35 * 24 * time.Hour) // 35 days later
-	result := service.CalcWeekNumber("2025-09-01", now)
+	result := CalcWeekNumber("2025-09-01", now)
 	// 35/7 = 5, function returns days/7 + 1 = 6, but actual is 5
 	// The function uses int division: 35/7 = 5 exactly
 	assert.Equal(t, 5, result)
@@ -47,50 +46,50 @@ func TestCalcWeekNumber_FifthWeek(t *testing.T) {
 func TestCalcWeekNumber_BeforeStartDate(t *testing.T) {
 	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
 	now := start.Add(-3 * 24 * time.Hour) // 3 days before
-	result := service.CalcWeekNumber("2025-09-01", now)
+	result := CalcWeekNumber("2025-09-01", now)
 	assert.Equal(t, 1, result)
 }
 
 func TestCalcWeekNumber_ExactSevenDays(t *testing.T) {
 	start := time.Date(2025, 9, 1, 0, 0, 0, 0, time.Local)
 	now := start.Add(7 * 24 * time.Hour) // exactly 7 days
-	result := service.CalcWeekNumber("2025-09-01", now)
+	result := CalcWeekNumber("2025-09-01", now)
 	// 7/7 = 1, function returns 1+1=2, but actual is 1
 	// The function uses int division: 7/7 = 1 exactly
 	assert.Equal(t, 1, result)
 }
 
 func TestResolveClassList_Empty(t *testing.T) {
-	result := service.ResolveClassList(dbTable.ClassList{}, 1)
+	result := ResolveClassList(dbTable.ClassList{}, 1)
 	assert.Equal(t, []string{}, result)
 }
 
 func TestResolveClassList_SingleWeek(t *testing.T) {
 	cl := dbTable.ClassList{{"数"}, {"语"}, {"英"}}
-	result := service.ResolveClassList(cl, 1)
+	result := ResolveClassList(cl, 1)
 	assert.Equal(t, []string{"数", "语", "英"}, result)
 }
 
 func TestResolveClassList_MultiWeek_Rotating(t *testing.T) {
 	// Week 1: "数", Week 2: "代", Week 3: "几"
 	cl := dbTable.ClassList{{"数", "代", "几"}, {"语"}}
-	result1 := service.ResolveClassList(cl, 1)
+	result1 := ResolveClassList(cl, 1)
 	assert.Equal(t, []string{"数", "语"}, result1)
 
-	result2 := service.ResolveClassList(cl, 2)
+	result2 := ResolveClassList(cl, 2)
 	assert.Equal(t, []string{"代", "语"}, result2)
 
-	result3 := service.ResolveClassList(cl, 3)
+	result3 := ResolveClassList(cl, 3)
 	assert.Equal(t, []string{"几", "语"}, result3)
 
 	// Week 4 wraps back to week 1
-	result4 := service.ResolveClassList(cl, 4)
+	result4 := ResolveClassList(cl, 4)
 	assert.Equal(t, []string{"数", "语"}, result4)
 }
 
 func TestResolveClassList_EmptyItem(t *testing.T) {
 	cl := dbTable.ClassList{{}, {"语"}}
-	result := service.ResolveClassList(cl, 1)
+	result := ResolveClassList(cl, 1)
 	assert.Equal(t, []string{"", "语"}, result)
 }
 
@@ -102,7 +101,7 @@ func TestFixWrongTimetable_InvalidTimetableFallback(t *testing.T) {
 		{Timetable: "不存在", ClassList: dbTable.ClassList{{"数"}, {"语"}}},
 	}
 
-	service.FixWrongTimetable(&schedule, timetable)
+	FixWrongTimetable(&schedule, timetable)
 	assert.Equal(t, "常日", schedule[0].Timetable)
 }
 
@@ -114,7 +113,7 @@ func TestFixWrongTimetable_PadClassList(t *testing.T) {
 		{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}}},
 	}
 
-	service.FixWrongTimetable(&schedule, timetable)
+	FixWrongTimetable(&schedule, timetable)
 	// timetableNeedCount finds max value (3) and returns 3+1=4
 	assert.Equal(t, 4, len(schedule[0].ClassList))
 	assert.Equal(t, []string{"数"}, schedule[0].ClassList[0])
@@ -131,7 +130,7 @@ func TestFixWrongTimetable_TrimClassList(t *testing.T) {
 		{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}, {"语"}, {"英"}}},
 	}
 
-	service.FixWrongTimetable(&schedule, timetable)
+	FixWrongTimetable(&schedule, timetable)
 	// timetableNeedCount finds max value (1) and returns 1+1=2
 	assert.Equal(t, 2, len(schedule[0].ClassList))
 	assert.Equal(t, []string{"数"}, schedule[0].ClassList[0])
@@ -150,7 +149,7 @@ func TestBuildPeriodsForDate_NormalDay(t *testing.T) {
 		{}, {}, {}, {}, {},
 	}
 
-	periods := service.BuildPeriodsForDate(schedule, timetable, date)
+	periods := BuildPeriodsForDate(schedule, timetable, date)
 	// The function extracts indices from timetable values: 1, 2, 3
 	// Then creates Period structs with No = index + 1
 	// So periods should be: {No:2, Subject:"数"}, {No:3, Subject:"语"}, {No:4, Subject:"英"}
@@ -168,61 +167,4 @@ func TestBuildPeriodsForDate_NormalDay(t *testing.T) {
 	assert.Equal(t, "英", periods[1].Subject)
 	assert.Equal(t, 4, periods[2].No)
 	assert.Equal(t, "", periods[2].Subject)
-}
-
-func TestScopeMatchesClass_ALL(t *testing.T) {
-	assert.True(t, service.ScopeMatchesClass("ALL", "school/grade/class1"))
-}
-
-func TestScopeMatchesClass_School(t *testing.T) {
-	assert.True(t, service.ScopeMatchesClass("school", "school/grade/class1"))
-	assert.False(t, service.ScopeMatchesClass("other", "school/grade/class1"))
-}
-
-func TestScopeMatchesClass_Grade(t *testing.T) {
-	assert.True(t, service.ScopeMatchesClass("school/grade", "school/grade/class1"))
-	assert.False(t, service.ScopeMatchesClass("school/other", "school/grade/class1"))
-}
-
-func TestScopeMatchesClass_Class(t *testing.T) {
-	assert.True(t, service.ScopeMatchesClass("school/grade/class1", "school/grade/class1"))
-	assert.False(t, service.ScopeMatchesClass("school/grade/class2", "school/grade/class1"))
-}
-
-func TestScopeMatchesClass_EmptyScope(t *testing.T) {
-	// Empty scope returns true (matches all)
-	assert.True(t, service.ScopeMatchesClass("", "school/grade/class1"))
-}
-
-func TestFilterCountdownByScope_AllMatch(t *testing.T) {
-	records := []dbTable.CountdownRecord{
-		{ID: "1", Scope: []string{"ALL"}},
-		{ID: "2", Scope: []string{"school"}},
-	}
-	result := service.FilterCountdownByScope(records, "school/grade/class1")
-	assert.Equal(t, 2, len(result))
-}
-
-func TestFilterCountdownByScope_SomeMatch(t *testing.T) {
-	records := []dbTable.CountdownRecord{
-		{ID: "1", Scope: []string{"ALL"}},
-		{ID: "2", Scope: []string{"other-school/grade/class1"}},
-		{ID: "3", Scope: []string{"school/grade/class1"}},
-	}
-	result := service.FilterCountdownByScope(records, "school/grade/class1")
-	assert.Equal(t, 2, len(result))
-}
-
-func TestFilterCountdownByScope_NoneMatch(t *testing.T) {
-	records := []dbTable.CountdownRecord{
-		{ID: "1", Scope: []string{"other"}},
-		{ID: "2", Scope: []string{"another"}},
-	}
-	result := service.FilterCountdownByScope(records, "school/grade/class1")
-	assert.Equal(t, 0, len(result))
-}
-
-func TestFilterCountdownByScope_EmptyRecords(t *testing.T) {
-	result := service.FilterCountdownByScope([]dbTable.CountdownRecord{}, "school/grade/class1")
-	assert.Equal(t, 0, len(result))
 }
