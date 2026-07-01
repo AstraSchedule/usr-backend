@@ -15,6 +15,98 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+type handlerError struct {
+	status int
+	msg    string
+}
+
+// sortedTimetableKeys 返回排序后的作息表名称列表，"常日" 始终排在首位
+func sortedTimetableKeys(timetable map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(timetable))
+	for name := range timetable {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if k == "常日" {
+			keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
+			break
+		}
+	}
+	return keys
+}
+
+func respondCopyError(c *gin.Context, err error, resource string) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源" + resource})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
+// validateCopyPayload 校验复制请求参数
+func validateCopyPayload(payload *copyConfigPayload) (fromClass, toClass string, err *handlerError) {
+	fromClass = payload.From.ClassValue()
+	toClass = payload.To.ClassValue()
+	if payload.From.School == "" || payload.From.Grade == "" || fromClass == "" ||
+		payload.To.School == "" || payload.To.Grade == "" || toClass == "" {
+		return "", "", &handlerError{http.StatusBadRequest, "from/to 的 school、grade、class 均不能为空"}
+	}
+	if payload.From.School == payload.To.School && payload.From.Grade == payload.To.Grade && fromClass == toClass {
+		return "", "", &handlerError{http.StatusBadRequest, "来源与目标完全一致，无需复制"}
+	}
+	return fromClass, toClass, nil
+}
+
+// parseClassListRaw 从嵌套的 interface{} 中解析 classList
+func parseClassListRaw(raw interface{}) [][]string {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	var result [][]string
+	for _, classItem := range arr {
+		arr2, ok := classItem.([]interface{})
+		if !ok {
+			continue
+		}
+		line := make([]string, 0, len(arr2))
+		for _, x := range arr2 {
+			if s, ok := x.(string); ok {
+				line = append(line, s)
+			}
+		}
+		result = append(result, line)
+	}
+	return result
+}
+
+// parseSchedulePayload 从原始 JSON 中解析课表请求体
+func parseSchedulePayload(raw map[string]interface{}) schedulePayload {
+	bodyMap := raw
+	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
+		bodyMap = modelVal
+	}
+	body := schedulePayload{}
+	arr, ok := bodyMap["daily_class"].([]interface{})
+	if !ok {
+		return body
+	}
+	for _, one := range arr {
+		obj, ok := one.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		item := dailyClassInput{}
+		item.Chinese, _ = obj["Chinese"].(string)
+		item.English, _ = obj["English"].(string)
+		item.Timetable, _ = obj["timetable"].(string)
+		item.ClassList = parseClassListRaw(obj["classList"])
+		body.DailyClass = append(body.DailyClass, item)
+	}
+	return body
+}
+
 func syncTimetableDividerKeys(cfg *dbTable.TimetableConfig) {
 	if cfg.Divider == nil {
 		cfg.Divider = map[string][]int{}
@@ -175,19 +267,7 @@ func GetTimetableOptions(c *gin.Context) {
 	grade := c.Param("grade")
 	timetable := db.GetTimetableNs(ns, school, grade)
 	options := make([]gin.H, 0)
-	keys := make([]string, 0, len(timetable.Timetable))
-	for name := range timetable.Timetable {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	if len(keys) > 0 {
-		for i, k := range keys {
-			if k == "常日" {
-				keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
-				break
-			}
-		}
-	}
+	keys := sortedTimetableKeys(timetable.Timetable)
 
 	for _, name := range keys {
 		config := timetable.Timetable[name]
