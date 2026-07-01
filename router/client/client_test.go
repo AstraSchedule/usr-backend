@@ -11,6 +11,7 @@ import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/testutil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
@@ -23,32 +24,8 @@ func ensureTestDB() {
 	if testDBInitialized {
 		return
 	}
-	model.Configs = model.SrvConfig{
-		Server: model.ServerConfig{
-			Host:   "127.0.0.1",
-			Port:   9000,
-			Domain: []string{"http://localhost:5173"},
-		},
-		Secret: model.SecretConfig{
-			Token: "test-token-123",
-		},
-		Db: model.DbConfig{
-			Type: "sqlite",
-			Path: ":memory:",
-		},
-		APIKey: model.APIKeyConfig{
-			APIHost: "geoapi.qweather.com",
-			Weather: "test-weather-key",
-		},
-		Log: model.LogConfig{
-			Debug: true,
-		},
-		Run: model.RunConfig{
-			Serverless: false,
-		},
-	}
-	database := db.GetDB()
-	database.AutoMigrate(
+	testutil.InitTestDB()
+	db.GetDB().AutoMigrate(
 		&dbTable.Schedule{},
 		&dbTable.ClientConfig{},
 		&dbTable.Timetable{},

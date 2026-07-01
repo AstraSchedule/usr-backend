@@ -1,8 +1,8 @@
 package db
 
 import (
-	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/testutil"
 	"os"
 	"testing"
 	"time"
@@ -17,30 +17,7 @@ import (
 
 func TestMain(m *testing.M) {
 	// Set up config for db package to use SQLite
-	model.Configs = model.SrvConfig{
-		Server: model.ServerConfig{
-			Host:   "127.0.0.1",
-			Port:   9000,
-			Domain: []string{"http://localhost:5173"},
-		},
-		Secret: model.SecretConfig{
-			Token: "test-token-123",
-		},
-		Db: model.DbConfig{
-			Type: "sqlite",
-			Path: ":memory:",
-		},
-		APIKey: model.APIKeyConfig{
-			APIHost: "geoapi.qweather.com",
-			Weather: "test-weather-key",
-		},
-		Log: model.LogConfig{
-			Debug: true,
-		},
-		Run: model.RunConfig{
-			Serverless: false,
-		},
-	}
+	testutil.InitTestDB()
 
 	// Initialize the database connection and create tables
 	database := GetDB()
