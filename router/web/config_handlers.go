@@ -444,6 +444,29 @@ func GetScheduleConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"daily_class": out})
 }
 
+// parseClassListRaw 从嵌套的 interface{} 中解析 classList
+func parseClassListRaw(raw interface{}) [][]string {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	var result [][]string
+	for _, classItem := range arr {
+		arr2, ok := classItem.([]interface{})
+		if !ok {
+			continue
+		}
+		line := make([]string, 0, len(arr2))
+		for _, x := range arr2 {
+			if s, ok := x.(string); ok {
+				line = append(line, s)
+			}
+		}
+		result = append(result, line)
+	}
+	return result
+}
+
 // parseSchedulePayload 从原始 JSON 中解析课表请求体
 func parseSchedulePayload(raw map[string]interface{}) schedulePayload {
 	bodyMap := raw
@@ -464,19 +487,7 @@ func parseSchedulePayload(raw map[string]interface{}) schedulePayload {
 		item.Chinese, _ = obj["Chinese"].(string)
 		item.English, _ = obj["English"].(string)
 		item.Timetable, _ = obj["timetable"].(string)
-		if classListRaw, ok := obj["classList"].([]interface{}); ok {
-			for _, classItem := range classListRaw {
-				if arr2, ok := classItem.([]interface{}); ok {
-					line := make([]string, 0, len(arr2))
-					for _, x := range arr2 {
-						if s, ok := x.(string); ok {
-							line = append(line, s)
-						}
-					}
-					item.ClassList = append(item.ClassList, line)
-				}
-			}
-		}
+		item.ClassList = parseClassListRaw(obj["classList"])
 		body.DailyClass = append(body.DailyClass, item)
 	}
 	return body

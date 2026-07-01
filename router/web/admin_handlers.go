@@ -34,7 +34,7 @@ func DropAstraTable(c *gin.Context) {
 		return
 	}
 
-	db.GetDB().Exec("DROP TABLE IF EXISTS " + tableName)
+	db.GetDB().Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)) //nolint:gosec // tableName validated against allowedAstraTables whitelist
 	logrus.Infof("已删除表: %s", tableName)
 
 	// Recreate by model name mapping

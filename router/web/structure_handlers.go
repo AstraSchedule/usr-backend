@@ -44,7 +44,7 @@ func DeleteSchool(c *gin.Context) {
 
 	tx := db.GetDB().Begin()
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
@@ -117,7 +117,7 @@ func DeleteGrade(c *gin.Context) {
 
 	tx := db.GetDB().Begin()
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
@@ -223,7 +223,7 @@ func DeleteClass(c *gin.Context) {
 
 	tx := db.GetDB().Begin()
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
