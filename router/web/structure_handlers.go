@@ -10,6 +10,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	whereSchool       = "school = ?"
+	whereSchoolGrade  = "school = ? AND grade = ?"
+	whereSchoolGradeClass = "school = ? AND grade = ? AND class = ?"
+)
+
 func CreateSchool(c *gin.Context) {
 	var req struct {
 		Name string `json:"name"`
@@ -20,7 +26,7 @@ func CreateSchool(c *gin.Context) {
 	}
 
 	var count int64
-	db.GetDB().Model(&dbTable.Schedule{}).Where("school = ?", req.Name).Count(&count)
+	db.GetDB().Model(&dbTable.Schedule{}).Where(whereSchool, req.Name).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusConflict, gin.H{"detail": "学校已存在"})
 		return
@@ -37,14 +43,18 @@ func DeleteSchool(c *gin.Context) {
 	}
 
 	tx := db.GetDB().Begin()
-	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	tx.Where("school = ?", school).Delete(&dbTable.Schedule{})
-	tx.Where("school = ?", school).Delete(&dbTable.ClientConfig{})
-	tx.Where("school = ?", school).Delete(&dbTable.DataVersion{})
-	tx.Where("school = ?", school).Delete(&dbTable.Subject{})
-	tx.Where("school = ?", school).Delete(&dbTable.Timetable{})
-	tx.Where("school = ?", school).Delete(&dbTable.AutorunRecord{})
+	tx.Where(whereSchool, school).Delete(&dbTable.Schedule{})
+	tx.Where(whereSchool, school).Delete(&dbTable.ClientConfig{})
+	tx.Where(whereSchool, school).Delete(&dbTable.DataVersion{})
+	tx.Where(whereSchool, school).Delete(&dbTable.Subject{})
+	tx.Where(whereSchool, school).Delete(&dbTable.Timetable{})
+	tx.Where(whereSchool, school).Delete(&dbTable.AutorunRecord{})
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -64,7 +74,7 @@ func CreateGrade(c *gin.Context) {
 	}
 
 	var count int64
-	db.GetDB().Model(&dbTable.Schedule{}).Where("school = ? AND grade = ?", school, req.Name).Count(&count)
+	db.GetDB().Model(&dbTable.Schedule{}).Where(whereSchoolGrade, school, req.Name).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusConflict, gin.H{"detail": "年级已存在"})
 		return
@@ -106,15 +116,19 @@ func DeleteGrade(c *gin.Context) {
 	grade := c.Param("grade")
 
 	tx := db.GetDB().Begin()
-	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.Schedule{})
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.ClientConfig{})
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.DataVersion{})
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.Subject{})
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.Timetable{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.Schedule{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.ClientConfig{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.DataVersion{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.Subject{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.Timetable{})
 	// 删除该年级下所有班级的自动任务
-	tx.Where("school = ? AND grade = ?", school, grade).Delete(&dbTable.AutorunRecord{})
+	tx.Where(whereSchoolGrade, school, grade).Delete(&dbTable.AutorunRecord{})
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -135,7 +149,7 @@ func CreateClass(c *gin.Context) {
 	}
 
 	var count int64
-	db.GetDB().Model(&dbTable.Schedule{}).Where("school = ? AND grade = ? AND class = ?", school, grade, req.Name).Count(&count)
+	db.GetDB().Model(&dbTable.Schedule{}).Where(whereSchoolGradeClass, school, grade, req.Name).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusConflict, gin.H{"detail": "班级已存在"})
 		return
@@ -169,21 +183,21 @@ func CreateClass(c *gin.Context) {
 			WeekDisplay:          true,
 			BannerText:           "",
 			CSSStyle: map[string]string{
-				"--center-font-size":       "30px",
-				"--corner-font-size":       "14px",
-				"--countdown-font-size":    "28px",
-				"--global-border-radius":   "16px",
-				"--global-bg-opacity":      "0.3",
-				"--container-bg-padding":   "8px 14px",
-				"--countdown-bg-padding":   "5px 12px",
-				"--container-space":        "16px",
-				"--top-space":              "16px",
-				"--main-horizontal-space":  "8px",
-				"--divider-width":          "2px",
-				"--divider-margin":         "6px",
-				"--triangle-size":          "16px",
-				"--sub-font-size":          "20px",
-				"--banner-height":          "30px",
+				"--center-font-size":      "30px",
+				"--corner-font-size":      "14px",
+				"--countdown-font-size":   "28px",
+				"--global-border-radius":  "16px",
+				"--global-bg-opacity":     "0.3",
+				"--container-bg-padding":  "8px 14px",
+				"--countdown-bg-padding":  "5px 12px",
+				"--container-space":       "16px",
+				"--top-space":             "16px",
+				"--main-horizontal-space": "8px",
+				"--divider-width":         "2px",
+				"--divider-margin":        "6px",
+				"--triangle-size":         "16px",
+				"--sub-font-size":         "20px",
+				"--banner-height":         "30px",
 			},
 			TemperatureColors: dbTable.TemperatureColorsConfig{
 				UseGradient: false,
@@ -208,11 +222,15 @@ func DeleteClass(c *gin.Context) {
 	classNumber := c.Param("class_number")
 
 	tx := db.GetDB().Begin()
-	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	tx.Where("school = ? AND grade = ? AND class = ?", school, grade, classNumber).Delete(&dbTable.Schedule{})
-	tx.Where("school = ? AND grade = ? AND class = ?", school, grade, classNumber).Delete(&dbTable.ClientConfig{})
-	tx.Where("school = ? AND grade = ? AND class = ?", school, grade, classNumber).Delete(&dbTable.DataVersion{})
+	tx.Where(whereSchoolGradeClass, school, grade, classNumber).Delete(&dbTable.Schedule{})
+	tx.Where(whereSchoolGradeClass, school, grade, classNumber).Delete(&dbTable.ClientConfig{})
+	tx.Where(whereSchoolGradeClass, school, grade, classNumber).Delete(&dbTable.DataVersion{})
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 			Path: ":memory:",
 		},
 		APIKey: model.APIKeyConfig{
-			APIHost: "https://geoapi.qweather.com",
+			APIHost: "geoapi.qweather.com",
 			Weather: "test-weather-key",
 		},
 		Log: model.LogConfig{
@@ -169,8 +169,7 @@ func TestGetLatestVersion_Found(t *testing.T) {
 }
 
 func TestUpsertAndFetchAutorunRecord(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.AutorunRecord{
 		HashID: "hash1",
@@ -195,12 +194,11 @@ func TestUpsertAndFetchAutorunRecord(t *testing.T) {
 
 	records, err := FetchAutorunRecords("")
 	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, len(records), 1)
+	assert.Equal(t, 1, len(records))
 }
 
 func TestDeleteAutorunRecord(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.AutorunRecord{
 		HashID: "hash-delete",
@@ -219,8 +217,7 @@ func TestDeleteAutorunRecord(t *testing.T) {
 }
 
 func TestUpsertAndFetchCountdownRecord(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.CountdownRecord{
 		ID:    "countdown-1",
@@ -235,12 +232,11 @@ func TestUpsertAndFetchCountdownRecord(t *testing.T) {
 
 	records, err := FetchCountdownRecords("")
 	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, len(records), 1)
+	assert.Equal(t, 1, len(records))
 }
 
 func TestDeleteCountdownRecord(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.CountdownRecord{
 		ID:    "countdown-delete",
@@ -342,8 +338,7 @@ func TestGetLatestVersionNs_Found(t *testing.T) {
 // FetchAutorunRecords with hashid filter
 
 func TestFetchAutorunRecords_WithHashID(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.AutorunRecord{
 		HashID:     "hash-filter",
@@ -363,8 +358,7 @@ func TestFetchAutorunRecords_WithHashID(t *testing.T) {
 // FetchCountdownRecords with id filter
 
 func TestFetchCountdownRecords_WithID(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.CountdownRecord{
 		ID:    "countdown-filter",
@@ -384,8 +378,7 @@ func TestFetchCountdownRecords_WithID(t *testing.T) {
 // Upsert update existing record
 
 func TestUpsertAutorunRecord_Update(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	record := &dbTable.AutorunRecord{
 		HashID:     "hash-update",
@@ -424,8 +417,7 @@ func TestExportBackupNs_Empty(t *testing.T) {
 }
 
 func TestImportBackup_Overwrite(t *testing.T) {
-	database := setupDBSingleton(t)
-	_ = database
+	setupDBSingleton(t)
 
 	// Create some test data
 	schedule := &dbTable.Schedule{
@@ -436,7 +428,7 @@ func TestImportBackup_Overwrite(t *testing.T) {
 			{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}}},
 		},
 	}
-	database.Save(schedule)
+	GetDB().Save(schedule)
 
 	// Export
 	payload, err := ExportBackup()

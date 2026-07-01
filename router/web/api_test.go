@@ -41,7 +41,7 @@ func ensureTestDB() {
 			Path: ":memory:",
 		},
 		APIKey: model.APIKeyConfig{
-			APIHost: "https://geoapi.qweather.com",
+			APIHost: "geoapi.qweather.com",
 			Weather: "test-weather-key",
 		},
 		Log: model.LogConfig{
@@ -99,7 +99,7 @@ func TestGetMenu_Empty(t *testing.T) {
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	data := resp["data"].([]interface{})
-	assert.GreaterOrEqual(t, len(data), 4) // At least 4 base menu items
+	assert.GreaterOrEqual(t, len(data), 4, "menu should contain at least 4 base items")
 }
 
 func TestGetStructure_Empty(t *testing.T) {
@@ -241,7 +241,7 @@ func TestCompensationFromHoliday_Success(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/web/autorun/compensation/holiday/2025/10/01", nil)
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestCompensationFromWorkday_Success(t *testing.T) {
@@ -254,7 +254,7 @@ func TestCompensationFromWorkday_Success(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/web/autorun/compensation/workday/2025/10/13", nil)
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestCompensationFromYear_Success(t *testing.T) {
@@ -267,7 +267,7 @@ func TestCompensationFromYear_Success(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/web/autorun/compensation/year/2025", nil)
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestGetScheduleByDate_Success(t *testing.T) {
@@ -277,10 +277,10 @@ func TestGetScheduleByDate_Success(t *testing.T) {
 	router.GET("/web/schedule/by-date", GetScheduleByDate)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/web/schedule/by-date?school=school1&grade=grade1&class=class1&date=2025-10-13", nil)
+	req, _ := http.NewRequest("GET", "/web/schedule/by-date?scope=school1/grade1/class1&date=2025-10-13", nil)
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // PutSubjects tests
@@ -316,7 +316,7 @@ func TestPutSubjects_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // PutTimetable tests
@@ -354,7 +354,7 @@ func TestPutTimetable_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // PutScheduleConfig tests
@@ -392,7 +392,7 @@ func TestPutScheduleConfig_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // PutSettings tests
@@ -428,7 +428,7 @@ func TestPutSettings_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // CopyConfig tests
@@ -472,7 +472,7 @@ func TestCopyConfig_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusNotFound || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // Autorun handlers tests
@@ -517,7 +517,7 @@ func TestExportBackup_Success(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/web/backup/export", nil)
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestImportBackup_InvalidJSON(t *testing.T) {
@@ -531,5 +531,5 @@ func TestImportBackup_InvalidJSON(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == http.StatusBadRequest || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

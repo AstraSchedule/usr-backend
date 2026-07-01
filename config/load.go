@@ -21,14 +21,8 @@ var configCandidates = []struct {
 	{".env", "env"},
 }
 
-func Load(path string) (*model.SrvConfig, error) {
-	v := viper.New()
-
-	v.SetEnvPrefix("ASTRA")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	loaded := false
+// loadConfigFile 按优先级尝试加载配置文件，返回是否成功
+func loadConfigFile(v *viper.Viper, explicitPath string) bool {
 	for _, c := range configCandidates {
 		if _, err := os.Stat(c.path); err == nil {
 			v.SetConfigFile(c.path)
@@ -38,26 +32,37 @@ func Load(path string) (*model.SrvConfig, error) {
 				continue
 			}
 			logrus.Infof("已加载配置文件: %s", v.ConfigFileUsed())
-			loaded = true
-			break
+			return true
 		}
 	}
 
-	if !loaded && path != "" {
-		if _, err := os.Stat(path); err == nil {
-			ext := strings.TrimPrefix(path, ".")
-			if idx := strings.LastIndex(ext, "."); idx >= 0 {
-				ext = ext[idx+1:]
-			}
-			v.SetConfigFile(path)
-			v.SetConfigType(ext)
-			if err := v.ReadInConfig(); err == nil {
-				logrus.Infof("已加载配置文件: %s", v.ConfigFileUsed())
-				loaded = true
-			}
-		}
+	if explicitPath == "" {
+		return false
 	}
+	if _, err := os.Stat(explicitPath); err != nil {
+		return false
+	}
+	ext := strings.TrimPrefix(explicitPath, ".")
+	if idx := strings.LastIndex(ext, "."); idx >= 0 {
+		ext = ext[idx+1:]
+	}
+	v.SetConfigFile(explicitPath)
+	v.SetConfigType(ext)
+	if err := v.ReadInConfig(); err != nil {
+		return false
+	}
+	logrus.Infof("已加载配置文件: %s", v.ConfigFileUsed())
+	return true
+}
 
+func Load(path string) (*model.SrvConfig, error) {
+	v := viper.New()
+
+	v.SetEnvPrefix("ASTRA")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	loaded := loadConfigFile(v, path)
 	if !loaded {
 		logrus.Info("未找到配置文件，使用环境变量配置")
 	}

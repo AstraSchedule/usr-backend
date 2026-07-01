@@ -68,10 +68,10 @@ func TestAPIKeyConfig_Validate_JWTExpiresOutOfRange(t *testing.T) {
 	apiCfg := APIKeyConfig{
 		APIHost: "https://example.com",
 		JWT: JWTAuthConfig{
-			KID:            "key1",
-			ProjectID:      "proj1",
-			PrivateKeyPEM:  "pem",
-			Expires:        0,
+			KID:           "key1",
+			ProjectID:     "proj1",
+			PrivateKeyPEM: "pem",
+			Expires:       0,
 		},
 	}
 	err := apiCfg.Validate()
@@ -83,10 +83,10 @@ func TestAPIKeyConfig_Validate_JWTExpiresTooHigh(t *testing.T) {
 	apiCfg := APIKeyConfig{
 		APIHost: "https://example.com",
 		JWT: JWTAuthConfig{
-			KID:            "key1",
-			ProjectID:      "proj1",
-			PrivateKeyPEM:  "pem",
-			Expires:        90000,
+			KID:           "key1",
+			ProjectID:     "proj1",
+			PrivateKeyPEM: "pem",
+			Expires:       90000,
 		},
 	}
 	err := apiCfg.Validate()
@@ -97,10 +97,10 @@ func TestAPIKeyConfig_Validate_Valid(t *testing.T) {
 	apiCfg := APIKeyConfig{
 		APIHost: "https://example.com",
 		JWT: JWTAuthConfig{
-			KID:            "key1",
-			ProjectID:      "proj1",
-			PrivateKeyPEM:  "pem",
-			Expires:        3600,
+			KID:           "key1",
+			ProjectID:     "proj1",
+			PrivateKeyPEM: "pem",
+			Expires:       3600,
 		},
 	}
 	err := apiCfg.Validate()

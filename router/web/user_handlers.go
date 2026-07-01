@@ -21,13 +21,13 @@ func ListUsers(c *gin.Context) {
 	out := make([]gin.H, 0, len(users))
 	for _, u := range users {
 		out = append(out, gin.H{
-			"id":              u.ID,
-			"username":        u.Username,
-			"role":            u.Role,
-			"scope":              u.Scope,
-			"must_change_pwd":    u.MustChangePwd,
+			"id":                   u.ID,
+			"username":             u.Username,
+			"role":                 u.Role,
+			"scope":                u.Scope,
+			"must_change_pwd":      u.MustChangePwd,
 			"must_change_username": u.MustChangeUsername,
-			"created_at":         u.CreatedAt,
+			"created_at":           u.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -36,12 +36,12 @@ func ListUsers(c *gin.Context) {
 func CreateUser(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
 	var req struct {
-		Username          string `json:"username"`
-		Password          string `json:"password"`
-		Role              string `json:"role"`
-		Scope             string `json:"scope"`
-		MustChangePwd     *bool  `json:"must_change_pwd"`
-		MustChangeUsername *bool `json:"must_change_username"`
+		Username           string `json:"username"`
+		Password           string `json:"password"`
+		Role               string `json:"role"`
+		Scope              string `json:"scope"`
+		MustChangePwd      *bool  `json:"must_change_pwd"`
+		MustChangeUsername *bool  `json:"must_change_username"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数"})
@@ -71,8 +71,8 @@ func CreateUser(c *gin.Context) {
 	}
 
 	user := dbTable.User{
-		Namespace:           ns,
-		Username:            req.Username,
+		Namespace:          ns,
+		Username:           req.Username,
 		PasswordHash:       hash,
 		Role:               req.Role,
 		Scope:              req.Scope,
@@ -94,6 +94,34 @@ func CreateUser(c *gin.Context) {
 			"scope":    user.Scope,
 		},
 	})
+}
+
+type handlerError struct {
+	status int
+	msg    string
+}
+
+var validRoles = map[string]bool{"admin": true, "school_w": true, "grade_w": true, "class_w": true, "readonly": true}
+
+func applyPasswordUpdate(user *dbTable.User, password string) *handlerError {
+	if len(password) < 6 {
+		return &handlerError{http.StatusBadRequest, "密码长度不能少于 6 位"}
+	}
+	hash, err := service.HashPassword(password)
+	if err != nil {
+		return &handlerError{http.StatusInternalServerError, "密码哈希失败"}
+	}
+	user.PasswordHash = hash
+	user.MustChangePwd = false
+	return nil
+}
+
+func applyRoleUpdate(user *dbTable.User, role string) *handlerError {
+	if !validRoles[role] {
+		return &handlerError{http.StatusBadRequest, "无效的角色"}
+	}
+	user.Role = role
+	return nil
 }
 
 func UpdateUser(c *gin.Context) {
@@ -127,25 +155,16 @@ func UpdateUser(c *gin.Context) {
 		user.Username = *req.Username
 	}
 	if req.Password != nil {
-		if len(*req.Password) < 6 {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "密码长度不能少于 6 位"})
+		if err := applyPasswordUpdate(user, *req.Password); err != nil {
+			c.JSON(err.status, gin.H{"detail": err.msg})
 			return
 		}
-		hash, err := service.HashPassword(*req.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "密码哈希失败"})
-			return
-		}
-		user.PasswordHash = hash
-		user.MustChangePwd = false
 	}
 	if req.Role != nil {
-		validRoles := map[string]bool{"admin": true, "school_w": true, "grade_w": true, "class_w": true, "readonly": true}
-		if !validRoles[*req.Role] {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的角色"})
+		if err := applyRoleUpdate(user, *req.Role); err != nil {
+			c.JSON(err.status, gin.H{"detail": err.msg})
 			return
 		}
-		user.Role = *req.Role
 	}
 	if req.Scope != nil {
 		user.Scope = *req.Scope

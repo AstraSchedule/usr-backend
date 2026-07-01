@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const dateFormat = "2006-01-02"
+
 type scheduleRuleCandidate struct {
 	Level int
 	Spec  int
@@ -70,7 +72,7 @@ func parseRuleDate(rule map[string]interface{}) (time.Time, bool) {
 	if dateStr == "" {
 		return time.Time{}, false
 	}
-	d, err := time.Parse("2006-01-02", dateStr)
+	d, err := time.Parse(dateFormat, dateStr)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -174,7 +176,7 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 
 	for _, c := range collectCandidates(records, 0, school, grade, classNumber, targetDate) {
 		useDateStr, _ := c.Rule["useDate"].(string)
-		useDate, err := time.Parse("2006-01-02", useDateStr)
+		useDate, err := time.Parse(dateFormat, useDateStr)
 		if err != nil {
 			continue
 		}
@@ -263,7 +265,7 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 	if startDateStr == "" {
 		return 1
 	}
-	start, err := time.Parse("2006-01-02", startDateStr)
+		start, err := time.Parse(dateFormat, startDateStr)
 	if err != nil {
 		return 1
 	}

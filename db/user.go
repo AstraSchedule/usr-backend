@@ -6,6 +6,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const whereID = "id = ?"
+
 func GetUserByUsername(namespace, username string) (*dbTable.User, error) {
 	user := &dbTable.User{}
 	err := GetDB().Where("namespace = ? AND username = ?", namespace, username).Take(user).Error
@@ -17,7 +19,7 @@ func GetUserByUsername(namespace, username string) (*dbTable.User, error) {
 
 func GetUserByID(id uint) (*dbTable.User, error) {
 	user := &dbTable.User{}
-	err := GetDB().Where("id = ?", id).Take(user).Error
+	err := GetDB().Where(whereID, id).Take(user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +45,7 @@ func UpdateUser(user *dbTable.User) error {
 }
 
 func DeleteUser(id uint) (int64, error) {
-	resp := GetDB().Where("id = ?", id).Delete(&dbTable.User{})
+	resp := GetDB().Where(whereID, id).Delete(&dbTable.User{})
 	return resp.RowsAffected, resp.Error
 }
 
@@ -68,7 +70,7 @@ func CountUsers(namespace string) (int64, error) {
 
 // UpdatePassword 更新用户密码哈希并清除 must_change_pwd 标志
 func UpdatePassword(userID uint, hash string) error {
-	return GetDB().Model(&dbTable.User{}).Where("id = ?", userID).
+	return GetDB().Model(&dbTable.User{}).Where(whereID, userID).
 		Updates(map[string]interface{}{
 			"password_hash":   hash,
 			"must_change_pwd": false,

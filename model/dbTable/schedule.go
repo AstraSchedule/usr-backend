@@ -16,32 +16,36 @@ func (c *ClassList) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	switch v := raw.(type) {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		*c = [][]string{}
+		return nil
+	}
+	result := make([][]string, 0, len(arr))
+	for _, item := range arr {
+		result = append(result, parseClassListItem(item))
+	}
+	*c = result
+	return nil
+}
+
+// parseClassListItem 将单个 JSON 元素解析为 []string
+// 支持旧版字符串格式和新版数组格式
+func parseClassListItem(item interface{}) []string {
+	switch elem := item.(type) {
 	case []interface{}:
-		result := make([][]string, 0, len(v))
-		for _, item := range v {
-			switch elem := item.(type) {
-			case []interface{}:
-				// 新版格式: [["物"], ["数"]]
-				row := make([]string, 0, len(elem))
-				for _, e := range elem {
-					if s, ok := e.(string); ok {
-						row = append(row, s)
-					}
-				}
-				result = append(result, row)
-			case string:
-				// 旧版格式: ["物", "数"]
-				result = append(result, []string{elem})
-			default:
-				result = append(result, []string{})
+		row := make([]string, 0, len(elem))
+		for _, e := range elem {
+			if s, ok := e.(string); ok {
+				row = append(row, s)
 			}
 		}
-		*c = result
+		return row
+	case string:
+		return []string{elem}
 	default:
-		*c = [][]string{}
+		return []string{}
 	}
-	return nil
 }
 
 func (c ClassList) MarshalJSON() ([]byte, error) {

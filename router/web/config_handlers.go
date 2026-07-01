@@ -15,6 +15,30 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// sortedTimetableKeys 返回排序后的作息表名称列表，"常日" 始终排在首位
+func sortedTimetableKeys(timetable map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(timetable))
+	for name := range timetable {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if k == "常日" {
+			keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
+			break
+		}
+	}
+	return keys
+}
+
+func respondCopyError(c *gin.Context, err error, resource string) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源" + resource})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
 func syncTimetableDividerKeys(cfg *dbTable.TimetableConfig) {
 	if cfg.Divider == nil {
 		cfg.Divider = map[string][]int{}
@@ -175,19 +199,7 @@ func GetTimetableOptions(c *gin.Context) {
 	grade := c.Param("grade")
 	timetable := db.GetTimetableNs(ns, school, grade)
 	options := make([]gin.H, 0)
-	keys := make([]string, 0, len(timetable.Timetable))
-	for name := range timetable.Timetable {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	if len(keys) > 0 {
-		for i, k := range keys {
-			if k == "常日" {
-				keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
-				break
-			}
-		}
-	}
+	keys := sortedTimetableKeys(timetable.Timetable)
 
 	for _, name := range keys {
 		config := timetable.Timetable[name]
@@ -264,41 +276,25 @@ func CopyConfig(c *gin.Context) {
 
 	var srcSubject dbTable.Subject
 	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcSubject).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源科目配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondCopyError(c, err, "科目配置")
 		return
 	}
 
 	var srcTimetable dbTable.Timetable
 	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcTimetable).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源作息配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondCopyError(c, err, "作息配置")
 		return
 	}
 
 	var srcSchedule dbTable.Schedule
 	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSchedule).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源课程表配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondCopyError(c, err, "课程表配置")
 		return
 	}
 
 	var srcSettings dbTable.ClientConfig
 	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSettings).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源通用设置配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondCopyError(c, err, "通用设置配置")
 		return
 	}
 
@@ -440,6 +436,44 @@ func GetScheduleConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"daily_class": out})
 }
 
+// parseSchedulePayload 从原始 JSON 中解析课表请求体
+func parseSchedulePayload(raw map[string]interface{}) schedulePayload {
+	bodyMap := raw
+	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
+		bodyMap = modelVal
+	}
+	body := schedulePayload{}
+	arr, ok := bodyMap["daily_class"].([]interface{})
+	if !ok {
+		return body
+	}
+	for _, one := range arr {
+		obj, ok := one.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		item := dailyClassInput{}
+		item.Chinese, _ = obj["Chinese"].(string)
+		item.English, _ = obj["English"].(string)
+		item.Timetable, _ = obj["timetable"].(string)
+		if classListRaw, ok := obj["classList"].([]interface{}); ok {
+			for _, classItem := range classListRaw {
+				if arr2, ok := classItem.([]interface{}); ok {
+					line := make([]string, 0, len(arr2))
+					for _, x := range arr2 {
+						if s, ok := x.(string); ok {
+							line = append(line, s)
+						}
+					}
+					item.ClassList = append(item.ClassList, line)
+				}
+			}
+		}
+		body.DailyClass = append(body.DailyClass, item)
+	}
+	return body
+}
+
 func PutScheduleConfig(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
@@ -451,37 +485,7 @@ func PutScheduleConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	bodyMap := raw
-	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
-		bodyMap = modelVal
-	}
-	body := schedulePayload{}
-	if arr, ok := bodyMap["daily_class"].([]interface{}); ok {
-		for _, one := range arr {
-			obj, ok := one.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			item := dailyClassInput{}
-			item.Chinese, _ = obj["Chinese"].(string)
-			item.English, _ = obj["English"].(string)
-			item.Timetable, _ = obj["timetable"].(string)
-			if classListRaw, ok := obj["classList"].([]interface{}); ok {
-				for _, classItem := range classListRaw {
-					if arr2, ok := classItem.([]interface{}); ok {
-						line := make([]string, 0, len(arr2))
-						for _, x := range arr2 {
-							if s, ok := x.(string); ok {
-								line = append(line, s)
-							}
-						}
-						item.ClassList = append(item.ClassList, line)
-					}
-				}
-			}
-			body.DailyClass = append(body.DailyClass, item)
-		}
-	}
+	body := parseSchedulePayload(raw)
 
 	var daily [7]dbTable.DailyClass
 	for i := 0; i < 7 && i < len(body.DailyClass); i++ {

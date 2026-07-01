@@ -16,6 +16,7 @@ const (
 	keySchoolPrefix  = "school-"
 	keyGradeInfix    = "-grade-"
 	keyClassInfix    = "-class-"
+	whereNamespace   = "namespace = ?"
 )
 
 func schoolKey(school string) string {
@@ -50,7 +51,7 @@ func listSchools(namespace string) ([]string, error) {
 	rows := make([]row, 0)
 	q := db.GetDB().Model(&dbTable.Schedule{})
 	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
+		q = q.Where(whereNamespace, namespace)
 	}
 	err := q.Distinct("school").Find(&rows).Error
 	if err != nil {
@@ -69,7 +70,7 @@ func listGrades(namespace, school string) ([]string, error) {
 	rows := make([]row, 0)
 	q := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ?", school)
 	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
+		q = q.Where(whereNamespace, namespace)
 	}
 	err := q.Distinct("grade").Find(&rows).Error
 	if err != nil {
@@ -88,7 +89,7 @@ func listClasses(namespace, school, grade string) ([]string, error) {
 	rows := make([]row, 0)
 	q := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ? AND grade = ?", school, grade)
 	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
+		q = q.Where(whereNamespace, namespace)
 	}
 	err := q.Distinct("class").Find(&rows).Error
 	if err != nil {
