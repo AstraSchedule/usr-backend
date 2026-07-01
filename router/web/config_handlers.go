@@ -252,6 +252,20 @@ func PutTimetable(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
+// validateCopyPayload 校验复制请求参数，返回 from/to class 和错误
+func validateCopyPayload(payload *copyConfigPayload) (fromClass, toClass string, err *handlerError) {
+	fromClass = payload.From.ClassValue()
+	toClass = payload.To.ClassValue()
+	if payload.From.School == "" || payload.From.Grade == "" || fromClass == "" ||
+		payload.To.School == "" || payload.To.Grade == "" || toClass == "" {
+		return "", "", &handlerError{http.StatusBadRequest, "from/to 的 school、grade、class 均不能为空"}
+	}
+	if payload.From.School == payload.To.School && payload.From.Grade == payload.To.Grade && fromClass == toClass {
+		return "", "", &handlerError{http.StatusBadRequest, "来源与目标完全一致，无需复制"}
+	}
+	return fromClass, toClass, nil
+}
+
 func CopyConfig(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
 	var payload copyConfigPayload
@@ -260,15 +274,9 @@ func CopyConfig(c *gin.Context) {
 		return
 	}
 
-	fromClass := payload.From.ClassValue()
-	toClass := payload.To.ClassValue()
-	if payload.From.School == "" || payload.From.Grade == "" || fromClass == "" ||
-		payload.To.School == "" || payload.To.Grade == "" || toClass == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "from/to 的 school、grade、class 均不能为空"})
-		return
-	}
-	if payload.From.School == payload.To.School && payload.From.Grade == payload.To.Grade && fromClass == toClass {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "来源与目标完全一致，无需复制"})
+	fromClass, toClass, verr := validateCopyPayload(&payload)
+	if verr != nil {
+		c.JSON(verr.status, gin.H{"detail": verr.msg})
 		return
 	}
 
