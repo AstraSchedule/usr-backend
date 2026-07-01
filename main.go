@@ -55,6 +55,9 @@ func main() {
 	// 管理员或密码验证可操作的写接口
 	secureWrite := router.Group("/", middleware.AdminOrToken())
 
+	// 内部服务间调用（仅需 API 密钥）
+	internalWrite := router.Group("/", middleware.InternalAuth())
+
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "Hello World",
@@ -133,8 +136,8 @@ func main() {
 	// 按日期出课节
 	router.GET("/web/schedule/by-date", web.GetScheduleByDate)
 
-	// Admin: DROP table (仅内部调用，需 BasicAuth + password 验证)
-	secureWrite.DELETE("/web/admin/drop-table/:table", web.DropAstraTable)
+	// Admin: DROP table (仅内部调用，需内部 API 密钥)
+	internalWrite.DELETE("/web/admin/drop-table/:table", web.DropAstraTable)
 
 	err := router.Run(fmt.Sprintf("%s:%d", model.Configs.Server.Host, model.Configs.Server.Port))
 	if err != nil {

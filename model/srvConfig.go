@@ -6,12 +6,17 @@ import (
 )
 
 type SrvConfig struct {
-	APIKey APIKeyConfig `mapstructure:"apikey"`
-	Secret SecretConfig `mapstructure:"secret"`
-	Server ServerConfig `mapstructure:"server"`
-	Db     DbConfig     `mapstructure:"db"`
-	Log    LogConfig    `mapstructure:"log"`
-	Run    RunConfig    `mapstructure:"run"`
+	APIKey   APIKeyConfig   `mapstructure:"apikey"`
+	Secret   SecretConfig   `mapstructure:"secret"`
+	Internal InternalConfig `mapstructure:"internal"`
+	Server   ServerConfig   `mapstructure:"server"`
+	Db       DbConfig       `mapstructure:"db"`
+	Log      LogConfig      `mapstructure:"log"`
+	Run      RunConfig      `mapstructure:"run"`
+}
+
+type InternalConfig struct {
+	Secret string `mapstructure:"secret"`
 }
 
 type APIKeyConfig struct {
