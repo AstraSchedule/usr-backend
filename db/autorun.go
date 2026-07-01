@@ -9,18 +9,9 @@ import (
 
 const hashIDWhere = "hash_id = ?"
 
-// FetchAutorunRecords 获取自动任务记录（无命名空间，向后兼容）
 func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
-	return FetchAutorunRecordsNs("", hashid)
-}
-
-// FetchAutorunRecordsNs 获取自动任务记录（带命名空间）
-func FetchAutorunRecordsNs(namespace, hashid string) ([]dbTable.AutorunRecord, error) {
 	records := make([]dbTable.AutorunRecord, 0)
 	q := GetDB().Model(&dbTable.AutorunRecord{})
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
 	if hashid != "" {
 		q = q.Where(hashIDWhere, hashid)
 	}
@@ -28,18 +19,8 @@ func FetchAutorunRecordsNs(namespace, hashid string) ([]dbTable.AutorunRecord, e
 	return records, err
 }
 
-// DeleteAutorunRecord 删除自动任务记录（无命名空间，向后兼容）
 func DeleteAutorunRecord(hashid string) (int64, error) {
-	return DeleteAutorunRecordNs("", hashid)
-}
-
-// DeleteAutorunRecordNs 删除自动任务记录（带命名空间）
-func DeleteAutorunRecordNs(namespace, hashid string) (int64, error) {
-	q := GetDB().Where(hashIDWhere, hashid)
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	resp := q.Delete(&dbTable.AutorunRecord{})
+	resp := GetDB().Where(hashIDWhere, hashid).Delete(&dbTable.AutorunRecord{})
 	return resp.RowsAffected, resp.Error
 }
 
@@ -79,14 +60,8 @@ func deriveStatusForRecord(etype int, parameters map[string]interface{}, today t
 	return 2
 }
 
-// RefreshAutorunStatuses 刷新自动任务状态（无命名空间，向后兼容）
 func RefreshAutorunStatuses(today time.Time) (int64, error) {
-	return RefreshAutorunStatusesNs("", today)
-}
-
-// RefreshAutorunStatusesNs 刷新自动任务状态（带命名空间）
-func RefreshAutorunStatusesNs(namespace string, today time.Time) (int64, error) {
-	records, err := FetchAutorunRecordsNs(namespace, "")
+	records, err := FetchAutorunRecords("")
 	if err != nil {
 		return 0, err
 	}

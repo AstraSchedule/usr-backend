@@ -256,89 +256,6 @@ func TestDeleteCountdownRecord(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
-// Namespace tests
-
-func TestGetScheduleNs_Found(t *testing.T) {
-	database := GetDB()
-	schedule := &dbTable.Schedule{
-		Namespace: "ns1",
-		School:    "school1",
-		Grade:     "grade1",
-		Class:     "class1",
-		DailyClasses: [7]dbTable.DailyClass{
-			{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}}},
-		},
-	}
-	database.Save(schedule)
-
-	result := GetScheduleNs("ns1", "school1", "grade1", "class1")
-	assert.NotNil(t, result)
-	assert.Equal(t, "school1", result.School)
-}
-
-func TestGetScheduleNs_NotFound(t *testing.T) {
-	result := GetScheduleNs("nonexistent", "school1", "grade1", "class1")
-	assert.NotNil(t, result)
-	assert.Equal(t, "", result.School)
-}
-
-func TestGetSubjectNs_Found(t *testing.T) {
-	database := GetDB()
-	subject := &dbTable.Subject{
-		School: "school1",
-		Grade:  "grade1",
-		SubjectConfig: dbTable.SubjectConfig{
-			SubjectName: map[string]string{"数": "数学"},
-		},
-	}
-	database.Save(subject)
-
-	result := GetSubjectNs("ns1", "school1", "grade1")
-	assert.NotNil(t, result)
-}
-
-func TestGetTimetableNs_Found(t *testing.T) {
-	database := GetDB()
-	timetable := &dbTable.Timetable{
-		School: "school1",
-		Grade:  "grade1",
-		TimetableConfig: dbTable.TimetableConfig{
-			Timetable: map[string]map[string]interface{}{"常日": {"早上1": 1}},
-		},
-	}
-	database.Save(timetable)
-
-	result := GetTimetableNs("ns1", "school1", "grade1")
-	assert.NotNil(t, result)
-}
-
-func TestGetClientConfigNs_Found(t *testing.T) {
-	database := GetDB()
-	config := &dbTable.ClientConfig{
-		School: "school1",
-		Grade:  "grade1",
-		Class:  "class1",
-	}
-	database.Save(config)
-
-	result := GetClientConfigNs("ns1", "school1", "grade1", "class1")
-	assert.NotNil(t, result)
-}
-
-func TestGetLatestVersionNs_Found(t *testing.T) {
-	database := GetDB()
-	version := &dbTable.DataVersion{
-		School:  "school1",
-		Grade:   "grade1",
-		Class:   "class1",
-		Version: time.Now(),
-	}
-	database.Save(version)
-
-	result := GetLatestVersionNs("ns1", "school1", "grade1", "class1")
-	assert.NotNil(t, result)
-}
-
 // FetchAutorunRecords with hashid filter
 
 func TestFetchAutorunRecords_WithHashID(t *testing.T) {
@@ -452,14 +369,6 @@ func TestImportBackup_Overwrite(t *testing.T) {
 func TestImportBackup_NilPayload(t *testing.T) {
 	_, err := ImportBackup(nil, "overwrite")
 	assert.Error(t, err)
-}
-
-func TestSetSliceNamespace(t *testing.T) {
-	schedules := []dbTable.Schedule{
-		{School: "school1", Grade: "grade1", Class: "class1"},
-	}
-	setSliceNamespace(schedules, "ns1")
-	assert.Equal(t, "ns1", schedules[0].Namespace)
 }
 
 func TestResetIDsToZero(t *testing.T) {

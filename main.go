@@ -30,7 +30,6 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.Use(middleware.NamespaceMiddleware())
 
 	weatherCacheStore := persistence.NewInMemoryStore(10 * time.Minute)
 
@@ -62,7 +61,7 @@ func main() {
 	})
 
 	// 完整更新课表（兼容 BasicAuth 客户端）
-	secureWrite.PUT("/:school/:grade/:class", middleware.RequireScope(), client.PutSchedule)
+	secureWrite.PUT("/:school/:grade/:class", client.PutSchedule)
 	// 获取完整课表
 	router.GET("/:school/:grade/:class", client.GetSchedule)
 	// 通过省份和城市查询天气
@@ -74,7 +73,7 @@ func main() {
 	// WebSocket
 	router.Any("/ws/:school/:grade/:class_number", client.WebSocketPlaceholder)
 	// 广播
-	secureWrite.POST("/api/broadcast/:school/:grade/:class_number", middleware.RequireScope(), client.BroadcastSyncConfig)
+	secureWrite.POST("/api/broadcast/:school/:grade/:class_number", client.BroadcastSyncConfig)
 
 	// 统计/菜单/结构
 	router.GET("/web/statistic", web.GetStatistic)
@@ -97,18 +96,18 @@ func main() {
 	// 配置接口
 	router.GET("/web/config/:school/:grade/subjects/options", web.GetSubjectsOptions)
 	router.GET("/web/config/:school/:grade/subjects", web.GetSubjects)
-	secureWrite.PUT("/web/config/:school/:grade/subjects", middleware.RequireScope(), web.PutSubjects)
+	secureWrite.PUT("/web/config/:school/:grade/subjects", web.PutSubjects)
 
 	router.GET("/web/config/:school/:grade/timetable/options", web.GetTimetableOptions)
 	router.GET("/web/config/:school/:grade/timetable", web.GetTimetable)
-	secureWrite.PUT("/web/config/:school/:grade/timetable", middleware.RequireScope(), web.PutTimetable)
+	secureWrite.PUT("/web/config/:school/:grade/timetable", web.PutTimetable)
 
 	router.GET("/web/config/:school/:grade/:class_number/schedule", web.GetScheduleConfig)
-	secureWrite.PUT("/web/config/:school/:grade/:class_number/schedule", middleware.RequireScope(), web.PutScheduleConfig)
+	secureWrite.PUT("/web/config/:school/:grade/:class_number/schedule", web.PutScheduleConfig)
 
 	router.GET("/web/config/:school/:grade/:class_number/settings", web.GetSettings)
-	secureWrite.PUT("/web/config/:school/:grade/:class_number/settings", middleware.RequireScope(), web.PutSettings)
-	secureWrite.POST("/web/config/copy", middleware.RequireScope(), web.CopyConfig)
+	secureWrite.PUT("/web/config/:school/:grade/:class_number/settings", web.PutSettings)
+	secureWrite.POST("/web/config/copy", web.CopyConfig)
 
 	// 自动任务
 	router.GET("/web/autorun", web.GetAutorunStatus)

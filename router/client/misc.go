@@ -1,7 +1,6 @@
 package client
 
 import (
-	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"net/http"
 	"sync"
@@ -12,9 +11,8 @@ import (
 )
 
 type wsScope struct {
-	Namespace string
-	School    string
-	Grade     string
+	School string
+	Grade  string
 }
 
 type wsHub struct {
@@ -97,7 +95,6 @@ func (h *wsHub) broadcast(scope wsScope, message string) int {
 }
 
 func BroadcastSyncConfig(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
@@ -111,7 +108,7 @@ func BroadcastSyncConfig(c *gin.Context) {
 		})
 		return
 	}
-	scope := wsScope{Namespace: ns, School: school, Grade: grade}
+	scope := wsScope{School: school, Grade: grade}
 	sent := clientWsHub.broadcast(scope, "SyncConfig")
 	logrus.Infof("收到广播请求：%s 学校 %s 级 %s 班，已广播 SyncConfig，成功发送 %d 条", school, grade, classNumber, sent)
 	if sent == 0 {
@@ -133,11 +130,10 @@ func WebSocketPlaceholder(c *gin.Context) {
 		return
 	}
 
-	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	classNumber := c.Param("class_number")
-	scope := wsScope{Namespace: ns, School: school, Grade: grade}
+	scope := wsScope{School: school, Grade: grade}
 
 	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

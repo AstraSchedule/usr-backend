@@ -2,7 +2,6 @@ package client
 
 import (
 	"AstraScheduleServerGo/db"
-	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 )
 
 func PutSchedule(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
 	school := c.Param("school")
 	grade := c.Param("grade")
 	class := c.Param("class")
@@ -27,37 +25,32 @@ func PutSchedule(c *gin.Context) {
 	}
 	logrus.Infof("收到如下请求：%+v", fullCC)
 	cC := dbTable.ClientConfig{
-		Namespace:         ns,
 		School:            school,
 		Grade:             grade,
 		Class:             class,
 		ClientConfigItems: fullCC.ClientConfigItems,
 	}
 	schedule := dbTable.Schedule{
-		Namespace:    ns,
 		School:       school,
 		Grade:        grade,
 		Class:        class,
 		DailyClasses: fullCC.DailyClasses,
 	}
 	subject := dbTable.Subject{
-		Namespace:     ns,
 		School:        school,
 		Grade:         grade,
 		SubjectConfig: fullCC.SubjectConfig,
 	}
 	timetable := dbTable.Timetable{
-		Namespace:       ns,
 		School:          school,
 		Grade:           grade,
 		TimetableConfig: fullCC.TimetableConfig,
 	}
 	dataVersion := dbTable.DataVersion{
-		Namespace: ns,
-		School:    school,
-		Grade:     grade,
-		Class:     class,
-		Version:   time.Now(),
+		School:  school,
+		Grade:   grade,
+		Class:   class,
+		Version: time.Now(),
 	}
 	tx := db.GetDB().Begin()
 	if tx.Error != nil {
@@ -71,7 +64,7 @@ func PutSchedule(c *gin.Context) {
 	}()
 
 	tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&cC)
 	if tx.Error != nil {
@@ -80,7 +73,7 @@ func PutSchedule(c *gin.Context) {
 		return
 	}
 	tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&schedule)
 	if tx.Error != nil {
@@ -89,7 +82,7 @@ func PutSchedule(c *gin.Context) {
 		return
 	}
 	tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		UpdateAll: true,
 	}).Create(&dataVersion)
 	if tx.Error != nil {
@@ -98,7 +91,7 @@ func PutSchedule(c *gin.Context) {
 		return
 	}
 	tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
 		UpdateAll: true,
 	}).Create(&subject)
 	if tx.Error != nil {
@@ -107,7 +100,7 @@ func PutSchedule(c *gin.Context) {
 		return
 	}
 	tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}},
+		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}},
 		UpdateAll: true,
 	}).Create(&timetable)
 	if tx.Error != nil {

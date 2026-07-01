@@ -19,7 +19,7 @@ import (
 func setupTestUser(t *testing.T) *dbTable.User {
 	database := db.GetDB()
 	// Delete existing test user first
-	database.Where("namespace = ? AND username = ?", "default", "testuser").Delete(&dbTable.User{})
+	database.Where("username = ?", "testuser").Delete(&dbTable.User{})
 
 	hash, _ := service.HashPassword("test123")
 	user := &dbTable.User{
@@ -27,7 +27,6 @@ func setupTestUser(t *testing.T) *dbTable.User {
 		PasswordHash: hash,
 		Role:         "admin",
 		Scope:        "ALL",
-		Namespace:    "default",
 	}
 	database.Create(user)
 	return user

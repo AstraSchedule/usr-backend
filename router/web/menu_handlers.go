@@ -2,7 +2,6 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
-	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
@@ -45,14 +44,10 @@ func GetStatistic(c *gin.Context) {
 	})
 }
 
-func listSchools(namespace string) ([]string, error) {
+func listSchools() ([]string, error) {
 	type row struct{ School string }
 	rows := make([]row, 0)
-	q := db.GetDB().Model(&dbTable.Schedule{})
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	err := q.Distinct("school").Find(&rows).Error
+	err := db.GetDB().Model(&dbTable.Schedule{}).Distinct("school").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -64,14 +59,10 @@ func listSchools(namespace string) ([]string, error) {
 	return out, nil
 }
 
-func listGrades(namespace, school string) ([]string, error) {
+func listGrades(school string) ([]string, error) {
 	type row struct{ Grade string }
 	rows := make([]row, 0)
-	q := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ?", school)
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	err := q.Distinct("grade").Find(&rows).Error
+	err := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ?", school).Distinct("grade").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -83,14 +74,10 @@ func listGrades(namespace, school string) ([]string, error) {
 	return out, nil
 }
 
-func listClasses(namespace, school, grade string) ([]string, error) {
+func listClasses(school, grade string) ([]string, error) {
 	type row struct{ Class string }
 	rows := make([]row, 0)
-	q := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ? AND grade = ?", school, grade)
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	err := q.Distinct("class").Find(&rows).Error
+	err := db.GetDB().Model(&dbTable.Schedule{}).Where("school = ? AND grade = ?", school, grade).Distinct("class").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -103,26 +90,18 @@ func listClasses(namespace, school, grade string) ([]string, error) {
 }
 
 func GetMenu(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	menu := gin.H{"data": []gin.H{
-		{"to": "/", "text": "总览", "key": "go-back-home", "children": nil},
-		{"to": "/users", "text": "用户管理", "key": "users", "children": nil},
-		{"to": "/structure", "text": "结构管理", "key": "structure", "children": nil},
-		{"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil},
-		{"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil},
-		{"to": "/tools", "text": "实用工具", "key": "tools", "children": nil},
-	}}
+	menu := gin.H{"data": []gin.H{{"to": "/", "text": "总览", "key": "go-back-home", "children": nil}, {"to": "/autorun", "text": "自动任务", "key": "autorun", "children": nil}, {"to": "/countdown", "text": "倒数日", "key": "countdown", "children": nil}, {"to": "/tools", "text": "实用工具", "key": "tools", "children": nil}}}
 	data := menu["data"].([]gin.H)
-	schools, err := listSchools(ns)
+	schools, err := listSchools()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	for _, school := range schools {
-		grades, _ := listGrades(ns, school)
+		grades, _ := listGrades(school)
 		gradeChildren := make([]gin.H, 0)
 		for _, grade := range grades {
-			classes, _ := listClasses(ns, school, grade)
+			classes, _ := listClasses(school, grade)
 			gradeNodeKey := gradeKey(school, grade)
 			classConfigBasePath := configBasePath(school, grade)
 			children := []gin.H{
@@ -150,18 +129,17 @@ func GetMenu(c *gin.Context) {
 }
 
 func GetStructure(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	schools, err := listSchools(ns)
+	schools, err := listSchools()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	out := make([]gin.H, 0)
 	for _, school := range schools {
-		grades, _ := listGrades(ns, school)
+		grades, _ := listGrades(school)
 		gradeNodes := make([]gin.H, 0)
 		for _, grade := range grades {
-			classes, _ := listClasses(ns, school, grade)
+			classes, _ := listClasses(school, grade)
 			classNodes := make([]gin.H, 0)
 			for _, classNumber := range classes {
 				classNodes = append(classNodes, gin.H{"text": classNumber, "children": nil})

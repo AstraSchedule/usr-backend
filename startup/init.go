@@ -12,11 +12,11 @@ func StartInit() {
 	ReadConfig()
 	SetLog()
 	MigrateDb()
-	// SaaS 模式不自动创建 default namespace，用户通过 Dashboard 管理
+	EnsureAdminUser()
 }
 
-func EnsureAdminUser(namespace string) {
-	count, err := db.CountUsers(namespace)
+func EnsureAdminUser() {
+	count, err := db.CountUsers()
 	if err != nil {
 		logrus.Warnf("检查用户数量失败: %v", err)
 		return
@@ -32,12 +32,11 @@ func EnsureAdminUser(namespace string) {
 	}
 
 	admin := &dbTable.User{
-		Namespace:      namespace,
-		Username:       "admin",
-		PasswordHash:   hash,
-		Role:           "admin",
-		Scope:          "",
-		MustChangePwd:  true,
+		Username:      "admin",
+		PasswordHash:  hash,
+		Role:          "admin",
+		Scope:         "",
+		MustChangePwd: true,
 	}
 
 	if err := db.CreateUser(admin); err != nil {
@@ -45,5 +44,5 @@ func EnsureAdminUser(namespace string) {
 		return
 	}
 
-	logrus.Infof("已创建默认管理员账户: admin/admin（命名空间: %s，首次登录需修改密码）", namespace)
+	logrus.Infof("已创建默认管理员账户: admin/admin（首次登录需修改密码）")
 }

@@ -11,8 +11,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// allowedAstraTables 允许操作的表名白名单
+var allowedAstraTables = map[string]bool{
+	"schedules": true, "client_configs": true, "timetables": true,
+	"subjects": true, "data_versions": true, "autorun_records": true,
+	"countdown_records": true, "users": true,
+}
+
 func DropAstraTable(c *gin.Context) {
 	tableName := c.Param("table")
+
+	if !allowedAstraTables[tableName] {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "不允许的操作表"})
+		return
+	}
 
 	// Validate: check if table exists
 	var count int64
@@ -22,7 +34,7 @@ func DropAstraTable(c *gin.Context) {
 		return
 	}
 
-	db.GetDB().Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName))
+	db.GetDB().Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)) //nolint:gosec // tableName validated against allowedAstraTables whitelist
 	logrus.Infof("已删除表: %s", tableName)
 
 	// Recreate by model name mapping

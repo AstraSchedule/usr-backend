@@ -6,9 +6,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func GetUserByUsername(namespace, username string) (*dbTable.User, error) {
+const whereID = "id = ?"
+
+func GetUserByUsername(username string) (*dbTable.User, error) {
 	user := &dbTable.User{}
-	err := GetDB().Where("namespace = ? AND username = ?", namespace, username).Take(user).Error
+	err := GetDB().Where("username = ?", username).Take(user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -17,20 +19,16 @@ func GetUserByUsername(namespace, username string) (*dbTable.User, error) {
 
 func GetUserByID(id uint) (*dbTable.User, error) {
 	user := &dbTable.User{}
-	err := GetDB().Where("id = ?", id).Take(user).Error
+	err := GetDB().Where(whereID, id).Take(user).Error
 	if err != nil {
 		return nil, err
 	}
 	return user, nil
 }
 
-func ListUsers(namespace string) ([]dbTable.User, error) {
+func ListUsers() ([]dbTable.User, error) {
 	users := make([]dbTable.User, 0)
-	q := GetDB().Order("id ASC")
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	err := q.Find(&users).Error
+	err := GetDB().Order("id ASC").Find(&users).Error
 	return users, err
 }
 
@@ -43,32 +41,28 @@ func UpdateUser(user *dbTable.User) error {
 }
 
 func DeleteUser(id uint) (int64, error) {
-	resp := GetDB().Where("id = ?", id).Delete(&dbTable.User{})
+	resp := GetDB().Where(whereID, id).Delete(&dbTable.User{})
 	return resp.RowsAffected, resp.Error
 }
 
-// UpsertUser 按 namespace+username upsert（启动时创建默认管理员用）
+// UpsertUser 按 username upsert（启动时创建默认管理员用）
 func UpsertUser(user *dbTable.User) error {
 	return GetDB().Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "namespace"}, {Name: "username"}},
+		Columns:   []clause.Column{{Name: "username"}},
 		DoNothing: true,
 	}).Create(user).Error
 }
 
-// CountUsers 返回指定 namespace 的用户总数
-func CountUsers(namespace string) (int64, error) {
+// CountUsers 返回用户总数
+func CountUsers() (int64, error) {
 	var count int64
-	q := GetDB().Model(&dbTable.User{})
-	if namespace != "" {
-		q = q.Where("namespace = ?", namespace)
-	}
-	err := q.Count(&count).Error
+	err := GetDB().Model(&dbTable.User{}).Count(&count).Error
 	return count, err
 }
 
 // UpdatePassword 更新用户密码哈希并清除 must_change_pwd 标志
 func UpdatePassword(userID uint, hash string) error {
-	return GetDB().Model(&dbTable.User{}).Where("id = ?", userID).
+	return GetDB().Model(&dbTable.User{}).Where(whereID, userID).
 		Updates(map[string]interface{}{
 			"password_hash":   hash,
 			"must_change_pwd": false,
@@ -76,8 +70,8 @@ func UpdatePassword(userID uint, hash string) error {
 }
 
 // EnsureAdminUser 确保至少存在一个管理员账户，若无用户则创建 admin/admin
-func EnsureAdminUser(namespace string) {
-	count, err := CountUsers(namespace)
+func EnsureAdminUser() {
+	count, err := CountUsers()
 	if err != nil {
 		return
 	}

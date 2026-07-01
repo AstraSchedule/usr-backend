@@ -2,7 +2,6 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
-	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/service"
 	"net/http"
@@ -12,8 +11,7 @@ import (
 )
 
 func ListUsers(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	users, err := db.ListUsers(ns)
+	users, err := db.ListUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -34,7 +32,6 @@ func ListUsers(c *gin.Context) {
 }
 
 func CreateUser(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
 	var req struct {
 		Username          string `json:"username"`
 		Password          string `json:"password"`
@@ -71,7 +68,6 @@ func CreateUser(c *gin.Context) {
 	}
 
 	user := dbTable.User{
-		Namespace:           ns,
 		Username:            req.Username,
 		PasswordHash:       hash,
 		Role:               req.Role,
