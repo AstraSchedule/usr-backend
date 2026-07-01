@@ -116,25 +116,25 @@ func ExportBackupNs(namespace string) (*BackupPayload, error) {
 		base = base.Where("namespace = ?", namespace)
 	}
 
-	if err := base.Order(orderByIDAsc).Find(&payload.Schedules).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByIDAsc).Find(&payload.Schedules).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByIDAsc).Find(&payload.ClientConfigs).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByIDAsc).Find(&payload.ClientConfigs).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByIDAsc).Find(&payload.Timetables).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByIDAsc).Find(&payload.Timetables).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByIDAsc).Find(&payload.Subjects).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByIDAsc).Find(&payload.Subjects).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByIDAsc).Find(&payload.DataVersions).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByIDAsc).Find(&payload.DataVersions).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByCreatedAtAsc).Find(&payload.AutorunRecords).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByCreatedAtAsc).Find(&payload.AutorunRecords).Error; err != nil {
 		return nil, err
 	}
-	if err := base.Order(orderByCreatedAtAsc).Find(&payload.CountdownRecord).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Order(orderByCreatedAtAsc).Find(&payload.CountdownRecord).Error; err != nil {
 		return nil, err
 	}
 
