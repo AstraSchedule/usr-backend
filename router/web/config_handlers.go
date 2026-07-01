@@ -358,7 +358,7 @@ func CopyConfig(c *gin.Context) {
 		return
 	}
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
