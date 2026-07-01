@@ -32,12 +32,12 @@ func EnsureAdminUser(namespace string) {
 	}
 
 	admin := &dbTable.User{
-		Namespace:      namespace,
-		Username:       "admin",
-		PasswordHash:   hash,
-		Role:           "admin",
-		Scope:          "",
-		MustChangePwd:  true,
+		Namespace:     namespace,
+		Username:      "admin",
+		PasswordHash:  hash,
+		Role:          "admin",
+		Scope:         "",
+		MustChangePwd: true,
 	}
 
 	if err := db.CreateUser(admin); err != nil {
