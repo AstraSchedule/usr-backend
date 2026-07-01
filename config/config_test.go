@@ -107,29 +107,34 @@ run:
 	assert.Equal(t, "yaml-token", cfg.Secret.Token)
 }
 
+// setTestEnv 设置环境变量并在测试结束时清理
+func setTestEnv(t *testing.T, vars map[string]string) {
+	t.Helper()
+	for k, v := range vars {
+		os.Setenv(k, v)
+	}
+	t.Cleanup(func() {
+		for k := range vars {
+			os.Unsetenv(k)
+		}
+	})
+}
+
 func TestLoad_EnvVars(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	defer os.Chdir(origDir)
 
-	// Set environment variables
-	os.Setenv("ASTRA_SERVER_HOST", "env-host")
-	os.Setenv("ASTRA_SERVER_PORT", "3000")
-	os.Setenv("ASTRA_DB_TYPE", "sqlite")
-	os.Setenv("ASTRA_DB_PATH", ":memory:")
-	os.Setenv("ASTRA_SECRET_TOKEN", "env-token")
-	os.Setenv("ASTRA_APIKEY_APIHOST", "https://env.api.com")
-	os.Setenv("ASTRA_APIKEY_WEATHER", "env-weather-key")
-	defer func() {
-		os.Unsetenv("ASTRA_SERVER_HOST")
-		os.Unsetenv("ASTRA_SERVER_PORT")
-		os.Unsetenv("ASTRA_DB_TYPE")
-		os.Unsetenv("ASTRA_DB_PATH")
-		os.Unsetenv("ASTRA_SECRET_TOKEN")
-		os.Unsetenv("ASTRA_APIKEY_APIHOST")
-		os.Unsetenv("ASTRA_APIKEY_WEATHER")
-	}()
+	setTestEnv(t, map[string]string{
+		"ASTRA_SERVER_HOST":    "env-host",
+		"ASTRA_SERVER_PORT":    "3000",
+		"ASTRA_DB_TYPE":        "sqlite",
+		"ASTRA_DB_PATH":        ":memory:",
+		"ASTRA_SECRET_TOKEN":   "env-token",
+		"ASTRA_APIKEY_APIHOST": "https://env.api.com",
+		"ASTRA_APIKEY_WEATHER": "env-weather-key",
+	})
 
 	cfg, err := Load("")
 	require.NoError(t, err)
@@ -235,23 +240,15 @@ func TestLoad_DomainOverride(t *testing.T) {
 	os.Chdir(tmpDir)
 	defer os.Chdir(origDir)
 
-	// Set domain via env var
-	os.Setenv("ASTRA_SERVER_DOMAIN", "http://env1.com, http://env2.com")
-	os.Setenv("ASTRA_SERVER_HOST", "host")
-	os.Setenv("ASTRA_SERVER_PORT", "80")
-	os.Setenv("ASTRA_DB_TYPE", "sqlite")
-	os.Setenv("ASTRA_DB_PATH", ":memory:")
-	os.Setenv("ASTRA_SECRET_TOKEN", "token")
-	os.Setenv("ASTRA_APIKEY_APIHOST", "https://api.com")
-	defer func() {
-		os.Unsetenv("ASTRA_SERVER_DOMAIN")
-		os.Unsetenv("ASTRA_SERVER_HOST")
-		os.Unsetenv("ASTRA_SERVER_PORT")
-		os.Unsetenv("ASTRA_DB_TYPE")
-		os.Unsetenv("ASTRA_DB_PATH")
-		os.Unsetenv("ASTRA_SECRET_TOKEN")
-		os.Unsetenv("ASTRA_APIKEY_APIHOST")
-	}()
+	setTestEnv(t, map[string]string{
+		"ASTRA_SERVER_DOMAIN": "http://env1.com, http://env2.com",
+		"ASTRA_SERVER_HOST":   "host",
+		"ASTRA_SERVER_PORT":   "80",
+		"ASTRA_DB_TYPE":       "sqlite",
+		"ASTRA_DB_PATH":       ":memory:",
+		"ASTRA_SECRET_TOKEN":  "token",
+		"ASTRA_APIKEY_APIHOST": "https://api.com",
+	})
 
 	cfg, err := Load("")
 	require.NoError(t, err)

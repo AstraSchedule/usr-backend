@@ -38,7 +38,8 @@ func ExportBackup(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", content)
 }
 
-func ImportBackup(c *gin.Context) {
+// handleImportBackup 统一的备份导入处理逻辑
+func handleImportBackup(c *gin.Context, mode string) {
 	if c.Request.ContentLength > maxBackupImportSize {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "上传文件过大（限制 50MB）"})
 		return
@@ -54,23 +55,26 @@ func ImportBackup(c *gin.Context) {
 		return
 	}
 
-	// 支持通过 query 参数或 form 字段指定目标命名空间
 	overrideNs := c.Query("namespace")
 	if overrideNs == "" {
 		overrideNs = c.PostForm("namespace")
 	}
 
-	result, err := db.ImportBackupNs(payload, "overwrite", overrideNs)
+	result, err := db.ImportBackupNs(payload, mode, overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":  200,
-		"message": "备份导入完成",
-		"data":    result,
-	})
+	resp := gin.H{"status": 200, "message": "备份导入完成", "data": result}
+	if mode != "overwrite" {
+		resp["mode"] = mode
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func ImportBackup(c *gin.Context) {
+	handleImportBackup(c, "overwrite")
 }
 
 func parseBackupPayload(c *gin.Context) (*db.BackupPayload, error) {
@@ -132,44 +136,10 @@ func FullExportBackup(c *gin.Context) {
 
 // FullImportBackup 完整备份导入（使用 BasicAuth 验证，支持 overwrite/skip 模式）
 func FullImportBackup(c *gin.Context) {
-	if c.Request.ContentLength > maxBackupImportSize {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "上传文件过大（限制 50MB）"})
-		return
-	}
-
-	// 获取 mode 参数，默认 overwrite
 	mode := c.DefaultPostForm("mode", "overwrite")
 	if mode != "overwrite" && mode != "skip" {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效的 mode 参数，仅支持 overwrite 或 skip"})
 		return
 	}
-
-	payload, err := parseBackupPayload(c)
-	if err != nil {
-		if errors.Is(err, gorm.ErrInvalidData) {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "备份文件内容无效"})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
-		return
-	}
-
-	// 支持通过 query 参数或 form 字段指定目标命名空间
-	overrideNs := c.Query("namespace")
-	if overrideNs == "" {
-		overrideNs = c.PostForm("namespace")
-	}
-
-	result, err := db.ImportBackupNs(payload, mode, overrideNs)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":  200,
-		"message": "备份导入完成",
-		"mode":    mode,
-		"data":    result,
-	})
+	handleImportBackup(c, mode)
 }

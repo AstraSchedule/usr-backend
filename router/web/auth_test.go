@@ -33,6 +33,22 @@ func setupTestUser(t *testing.T) *dbTable.User {
 	return user
 }
 
+// doRequest 在 router 上执行请求并返回 recorder
+func doRequest(router *gin.Engine, method, path string, body interface{}) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	var reqBody *bytes.Buffer
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reqBody = bytes.NewBuffer(b)
+	} else {
+		reqBody = bytes.NewBuffer(nil)
+	}
+	req, _ := http.NewRequest(method, path, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	return w
+}
+
 // Login tests
 
 func TestLogin_InvalidJSON(t *testing.T) {
@@ -197,14 +213,7 @@ func TestVerifyPassword_WrongPassword(t *testing.T) {
 		VerifyPassword(c)
 	})
 
-	body := map[string]string{"password": "wrongpassword"}
-	bodyBytes, _ := json.Marshal(body)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/web/auth/verify-password", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
+	w := doRequest(router, "POST", "/web/auth/verify-password", map[string]string{"password": "wrongpassword"})
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
@@ -222,14 +231,7 @@ func TestVerifyPassword_Success(t *testing.T) {
 		VerifyPassword(c)
 	})
 
-	body := map[string]string{"password": "test123"}
-	bodyBytes, _ := json.Marshal(body)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/web/auth/verify-password", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
+	w := doRequest(router, "POST", "/web/auth/verify-password", map[string]string{"password": "test123"})
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
@@ -362,52 +364,28 @@ func TestCreateUser_InvalidJSON(t *testing.T) {
 
 func TestCreateUser_EmptyFields(t *testing.T) {
 	ensureTestDB()
-
 	router := setupTestRouter()
 	router.POST("/web/users", CreateUser)
 
-	body := map[string]string{"username": "", "password": ""}
-	bodyBytes, _ := json.Marshal(body)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/web/users", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
+	w := doRequest(router, "POST", "/web/users", map[string]string{"username": "", "password": ""})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestCreateUser_ShortPassword(t *testing.T) {
 	ensureTestDB()
-
 	router := setupTestRouter()
 	router.POST("/web/users", CreateUser)
 
-	body := map[string]string{"username": "newuser", "password": "123"}
-	bodyBytes, _ := json.Marshal(body)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/web/users", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
+	w := doRequest(router, "POST", "/web/users", map[string]string{"username": "newuser", "password": "123"})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestCreateUser_InvalidRole(t *testing.T) {
 	ensureTestDB()
-
 	router := setupTestRouter()
 	router.POST("/web/users", CreateUser)
 
-	body := map[string]string{"username": "newuser", "password": "password123", "role": "invalid"}
-	bodyBytes, _ := json.Marshal(body)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/web/users", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
+	w := doRequest(router, "POST", "/web/users", map[string]string{"username": "newuser", "password": "password123", "role": "invalid"})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 

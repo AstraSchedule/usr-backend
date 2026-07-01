@@ -290,67 +290,50 @@ func importDataVersions(tx *gorm.DB, rows []dbTable.DataVersion, mode string) (i
 	})
 }
 
-func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
+// importIDRows 通用的基于主键导入逻辑，支持 overwrite/skip 模式
+func importIDRows(tx *gorm.DB, rows interface{}, idCol string, updateCols []string, mode string) (int, error) {
+	// 使用 reflect 检查切片长度
+	switch v := rows.(type) {
+	case []dbTable.AutorunRecord:
+		if len(v) == 0 {
+			return 0, nil
+		}
+	case []dbTable.CountdownRecord:
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 
-	var onConflict clause.OnConflict
+	onConflict := clause.OnConflict{
+		Columns: []clause.Column{{Name: idCol}},
+	}
 	if mode == "skip" {
-		onConflict = clause.OnConflict{
-			Columns:   []clause.Column{{Name: "hash_id"}},
-			DoNothing: true,
-		}
+		onConflict.DoNothing = true
 	} else {
-		onConflict = clause.OnConflict{
-			Columns: []clause.Column{{Name: "hash_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"namespace",
-				"e_type",
-				"scope",
-				"parameters",
-				"level",
-				"status",
-				"created_at",
-				"updated_at",
-			}),
-		}
+		onConflict.DoUpdates = clause.AssignmentColumns(updateCols)
 	}
 
-	err := tx.Clauses(onConflict).Create(&rows).Error
+	err := tx.Clauses(onConflict).Create(rows).Error
 	if err != nil {
 		return 0, err
 	}
-	return len(rows), nil
+	switch v := rows.(type) {
+	case []dbTable.AutorunRecord:
+		return len(v), nil
+	case []dbTable.CountdownRecord:
+		return len(v), nil
+	}
+	return 0, nil
+}
+
+func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string) (int, error) {
+	return importIDRows(tx, rows, "hash_id", []string{
+		"namespace", "e_type", "scope", "parameters", "level", "status", "created_at", "updated_at",
+	}, mode)
 }
 
 func importCountdownRecords(tx *gorm.DB, rows []dbTable.CountdownRecord, mode string) (int, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-
-	var onConflict clause.OnConflict
-	if mode == "skip" {
-		onConflict = clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			DoNothing: true,
-		}
-	} else {
-		onConflict = clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"namespace",
-				"scope",
-				"schedules",
-				"created_at",
-				"updated_at",
-			}),
-		}
-	}
-
-	err := tx.Clauses(onConflict).Create(&rows).Error
-	if err != nil {
-		return 0, err
-	}
-	return len(rows), nil
+	return importIDRows(tx, rows, "id", []string{
+		"namespace", "scope", "schedules", "created_at", "updated_at",
+	}, mode)
 }
