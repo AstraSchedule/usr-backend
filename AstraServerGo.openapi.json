@@ -2343,6 +2343,54 @@
         },
         "security": [{ "basicAuth": [] }]
       }
+    },
+    "/web/admin/register-tenant": {
+      "post": {
+        "summary": "一键注册新租户",
+        "description": "内部接口：创建管理员用户 + 学校/年级/班级结构。需 X-Internal-Secret 认证。",
+        "operationId": "registerTenant",
+        "tags": ["web-admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["subdomain", "username", "password", "school", "grade", "class"],
+                "properties": {
+                  "subdomain": { "type": "string", "description": "子域名（用于生成 namespace）" },
+                  "username": { "type": "string", "description": "管理员用户名" },
+                  "password": { "type": "string", "description": "管理员密码" },
+                  "school": { "type": "string", "description": "学校名称" },
+                  "grade": { "type": "string", "description": "年级名称" },
+                  "class": { "type": "string", "description": "班级名称" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "success" },
+                    "message": { "type": "string" },
+                    "namespace": { "type": "string", "description": "创建的 namespace", "example": "cn/getastra/school-a" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "参数不完整" },
+          "401": { "description": "内部认证失败" },
+          "500": { "description": "创建失败" }
+        },
+        "security": [{ "internalAuth": [] }]
+      }
     }
   },
   "components": {
@@ -3101,6 +3149,12 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "description": "JWT Token，通过 POST /web/auth/login 获取。写入接口还需在 X-Verify-Password 头中提供密码。"
+      },
+      "internalAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Internal-Secret",
+        "description": "内部 API 密钥，用于服务间调用。配置文件 [internal].secret"
       }
     }
   },
