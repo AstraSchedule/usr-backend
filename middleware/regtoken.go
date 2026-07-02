@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 
 	"AstraScheduleServerGo/model"
@@ -29,19 +30,30 @@ func RegTokenAuth() gin.HandlerFunc {
 			return
 		}
 
+		secret := model.Configs.Internal.Secret
+		fmt.Printf("[RegTokenAuth] token length=%d, secret length=%d\n", len(tokenStr), len(secret))
+
 		token, err := jwt.ParseWithClaims(tokenStr, &RegClaims{}, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Method)
 			}
-			return []byte(model.Configs.Internal.Secret), nil
+			return []byte(secret), nil
 		})
-		if err != nil || !token.Valid {
+		if err != nil {
+			fmt.Printf("[RegTokenAuth] JWT parse error: %v\n", err)
+			c.JSON(http.StatusUnauthorized, gin.H{"detail": "注册令牌无效: " + err.Error()})
+			c.Abort()
+			return
+		}
+		if !token.Valid {
+			fmt.Println("[RegTokenAuth] JWT token invalid")
 			c.JSON(http.StatusUnauthorized, gin.H{"detail": "注册令牌无效"})
 			c.Abort()
 			return
 		}
 
 		claims := token.Claims.(*RegClaims)
+		fmt.Printf("[RegTokenAuth] OK: subdomain=%s username=%s\n", claims.Subdomain, claims.Username)
 		c.Set("reg_claims", claims)
 		c.Next()
 	}
