@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"net/http"
 	"time"
@@ -81,9 +82,11 @@ func CreateGrade(c *gin.Context) {
 	}
 
 	// 创建默认科目和作息表
+	ns := middleware.GetNamespace(c)
 	subject := dbTable.Subject{
-		School: school,
-		Grade:  req.Name,
+		Namespace: ns,
+		School:    school,
+		Grade:     req.Name,
 		SubjectConfig: dbTable.SubjectConfig{
 			SubjectName: map[string]string{
 				"课": "课程", "自": "自习", "英": "英语", "语": "语文",
@@ -95,8 +98,9 @@ func CreateGrade(c *gin.Context) {
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&subject)
 
 	timetable := dbTable.Timetable{
-		School: school,
-		Grade:  req.Name,
+		Namespace: ns,
+		School:    school,
+		Grade:     req.Name,
 		TimetableConfig: dbTable.TimetableConfig{
 			Timetable: map[string]map[string]interface{}{
 				"常日": {"00:00-00:00": 0, "00:01-23:59": "常日"},
@@ -155,10 +159,12 @@ func CreateClass(c *gin.Context) {
 		return
 	}
 
+	ns := middleware.GetNamespace(c)
 	schedule := dbTable.Schedule{
-		School: school,
-		Grade:  grade,
-		Class:  req.Name,
+		Namespace: ns,
+		School:    school,
+		Grade:     grade,
+		Class:     req.Name,
 		DailyClasses: [7]dbTable.DailyClass{
 			{Chinese: "日", English: "SUN", Timetable: "没课", ClassList: dbTable.ClassList{[]string{"课"}}},
 			{Chinese: "一", English: "MON", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
@@ -173,9 +179,10 @@ func CreateClass(c *gin.Context) {
 
 	// 创建默认客户端配置（含 CSS 变量）
 	clientConfig := dbTable.ClientConfig{
-		School: school,
-		Grade:  grade,
-		Class:  req.Name,
+		Namespace: ns,
+		School:    school,
+		Grade:     grade,
+		Class:     req.Name,
 		ClientConfigItems: dbTable.ClientConfigItems{
 			CountdownTarget:      "hidden",
 			WeatherAlertOverride: true,
