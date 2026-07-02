@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"AstraScheduleServerGo/db"
+	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/service"
 
@@ -12,27 +13,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type RegisterTenantRequest struct {
-	Subdomain string `json:"subdomain" binding:"required"`
-	Username  string `json:"username" binding:"required"`
-	Password  string `json:"password" binding:"required"`
-	School    string `json:"school" binding:"required"`
-	Grade     string `json:"grade" binding:"required"`
-	Class     string `json:"class" binding:"required"`
-}
-
-// RegisterTenant 内部接口：一键创建新租户（管理员 + 学校结构）
+// RegisterTenant 从已验证的 JWT 中读取注册信息，一键创建新租户
 func RegisterTenant(c *gin.Context) {
-	var req RegisterTenantRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "参数不完整"})
+	claims := middleware.GetRegClaims(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "缺少注册令牌"})
 		return
 	}
 
-	namespace := "cn/getastra/" + req.Subdomain
+	namespace := "cn/getastra/" + claims.Subdomain
 
 	// 1. 创建管理员用户
-	hash, err := service.HashPassword(req.Password)
+	hash, err := service.HashPassword(claims.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "密码哈希失败"})
 		return
@@ -40,7 +32,7 @@ func RegisterTenant(c *gin.Context) {
 
 	admin := &dbTable.User{
 		Namespace:          namespace,
-		Username:           req.Username,
+		Username:           claims.Username,
 		PasswordHash:       hash,
 		Role:               "admin",
 		MustChangePwd:      true,
@@ -54,8 +46,8 @@ func RegisterTenant(c *gin.Context) {
 	// 2. 创建学校（幂等）
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&dbTable.Subject{
 		Namespace: namespace,
-		School:    req.School,
-		Grade:     req.Grade,
+		School:    claims.School,
+		Grade:     claims.Grade,
 		SubjectConfig: dbTable.SubjectConfig{
 			SubjectName: map[string]string{
 				"课": "课程", "自": "自习", "英": "英语", "语": "语文",
@@ -68,8 +60,8 @@ func RegisterTenant(c *gin.Context) {
 	// 3. 创建作息表
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&dbTable.Timetable{
 		Namespace: namespace,
-		School:    req.School,
-		Grade:     req.Grade,
+		School:    claims.School,
+		Grade:     claims.Grade,
 		TimetableConfig: dbTable.TimetableConfig{
 			Timetable: map[string]map[string]interface{}{
 				"常日": {"00:00-00:00": 0, "00:01-23:59": "常日"},
@@ -83,9 +75,9 @@ func RegisterTenant(c *gin.Context) {
 	// 4. 创建课表
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&dbTable.Schedule{
 		Namespace: namespace,
-		School:    req.School,
-		Grade:     req.Grade,
-		Class:     req.Class,
+		School:    claims.School,
+		Grade:     claims.Grade,
+		Class:     claims.Class,
 		DailyClasses: [7]dbTable.DailyClass{
 			{Chinese: "日", English: "SUN", Timetable: "没课", ClassList: dbTable.ClassList{[]string{"课"}}},
 			{Chinese: "一", English: "MON", Timetable: "常日", ClassList: dbTable.ClassList{[]string{"课"}, []string{"课"}}},
@@ -100,9 +92,9 @@ func RegisterTenant(c *gin.Context) {
 	// 5. 创建客户端配置
 	db.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&dbTable.ClientConfig{
 		Namespace: namespace,
-		School:    req.School,
-		Grade:     req.Grade,
-		Class:     req.Class,
+		School:    claims.School,
+		Grade:     claims.Grade,
+		Class:     claims.Class,
 		ClientConfigItems: dbTable.ClientConfigItems{
 			CountdownTarget:      "hidden",
 			WeatherAlertOverride: true,
@@ -113,8 +105,8 @@ func RegisterTenant(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "租户创建成功",
+		"status":   "success",
+		"message":  "租户创建成功",
 		"namespace": namespace,
 	})
 }

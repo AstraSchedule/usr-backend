@@ -12,6 +12,10 @@ import (
 type RegClaims struct {
 	Subdomain string `json:"subdomain"`
 	Username  string `json:"username"`
+	Password  string `json:"password"`
+	School    string `json:"school"`
+	Grade     string `json:"grade"`
+	Class     string `json:"class"`
 	jwt.RegisteredClaims
 }
 
