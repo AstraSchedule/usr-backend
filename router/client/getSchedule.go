@@ -97,13 +97,13 @@ func GetSchedule(c *gin.Context) {
 	}
 	// 覆盖 daily_class 为扁平化格式
 	fullResponseMap := map[string]interface{}{
-		"support_websocket": fullResponse.SupportWebsocket,
-		"version":           fullResponse.Version,
-		"daily_class":       flatDailyClasses,
-		"client_config":     fullResponse.ClientConfigItems,
-		"timetable":         fullResponse.TimetableConfig,
-		"subject":           fullResponse.SubjectConfig,
-		"countdown":         fullResponse.CountdownRecords,
+		"supportWebsocket": fullResponse.SupportWebsocket,
+		"version":          fullResponse.Version,
+		"daily_class":      flatDailyClasses,
+		"client_config":    fullResponse.ClientConfigItems,
+		"timetable":        fullResponse.TimetableConfig,
+		"subject":          fullResponse.SubjectConfig,
+		"countdown":        fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
 }
