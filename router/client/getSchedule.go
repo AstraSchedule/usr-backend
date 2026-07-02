@@ -95,15 +95,22 @@ func GetSchedule(c *gin.Context) {
 		SubjectConfig:     subject.SubjectConfig,
 		CountdownRecords:  filteredCountdowns,
 	}
-	// 覆盖 daily_class 为扁平化格式
+	// 覆盖 daily_class 为扁平化格式，展开 client_config 到顶层
 	fullResponseMap := map[string]interface{}{
-		"supportWebSocket": fullResponse.SupportWebsocket,
-		"version":          fullResponse.Version,
-		"daily_class":      flatDailyClasses,
-		"client_config":    fullResponse.ClientConfigItems,
-		"timetable":        fullResponse.TimetableConfig,
-		"subject":          fullResponse.SubjectConfig,
-		"countdown":        fullResponse.CountdownRecords,
+		"supportWebSocket":       fullResponse.SupportWebsocket,
+		"version":                fullResponse.Version,
+		"daily_class":            flatDailyClasses,
+		"countdown_target":       fullResponse.CountdownTarget,
+		"weather_alert_override": fullResponse.WeatherAlertOverride,
+		"weather_alert_brief":    fullResponse.WeatherAlertBrief,
+		"week_display":           fullResponse.WeekDisplay,
+		"banner_text":            fullResponse.BannerText,
+		"css_style":              fullResponse.CSSStyle,
+		"startup_behavior":       fullResponse.StartupBehavior,
+		"temperature_colors":     fullResponse.TemperatureColors,
+		"timetable":              fullResponse.TimetableConfig,
+		"subject":                fullResponse.SubjectConfig,
+		"countdown":              fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
 }
