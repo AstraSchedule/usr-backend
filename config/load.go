@@ -76,6 +76,7 @@ func Load(path string) (*model.SrvConfig, error) {
 		"db.type", "db.host", "db.port", "db.user", "db.pass", "db.name", "db.path",
 		"log.debug",
 		"run.serverless",
+		"internal.secret",
 	}
 	for _, key := range envKeys {
 		if v.GetString(key) != "" {
