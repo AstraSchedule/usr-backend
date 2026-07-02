@@ -138,8 +138,10 @@ func main() {
 
 	// Admin: DROP table (仅内部调用，需内部 API 密钥)
 	internalWrite.DELETE("/web/admin/drop-table/:table", web.DropAstraTable)
-	// 注册新租户（仅内部调用，需内部 API 密钥 + mTLS）
-	internalWrite.POST("/web/admin/register-tenant", web.RegisterTenant)
+	// 注册新租户（需注册令牌认证）
+	regAuth := router.Group("/", middleware.RegTokenAuth())
+	regAuth.POST("/web/admin/register-tenant", web.RegisterTenant)
+
 	// 检查子域名是否已存在（仅内部调用）
 	internalWrite.GET("/web/admin/check-subdomain/:subdomain", web.CheckSubdomainInternal)
 
