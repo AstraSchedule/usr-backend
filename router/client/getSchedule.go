@@ -97,7 +97,7 @@ func GetSchedule(c *gin.Context) {
 	}
 	// 覆盖 daily_class 为扁平化格式
 	fullResponseMap := map[string]interface{}{
-		"supportWebsocket": fullResponse.SupportWebsocket,
+		"supportWebSocket": fullResponse.SupportWebsocket,
 		"version":          fullResponse.Version,
 		"daily_class":      flatDailyClasses,
 		"client_config":    fullResponse.ClientConfigItems,
