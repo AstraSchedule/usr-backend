@@ -60,6 +60,14 @@ func handleImportBackup(c *gin.Context, mode string) {
 		overrideNs = c.PostForm("namespace")
 	}
 
+	// 自动检测自部署备份：如果 SaaS 表记录没有 namespace，用当前用户的 namespace 填充
+	if overrideNs == "" && len(payload.Schedules) > 0 && payload.Schedules[0].Namespace == "" {
+		if claims := middleware.GetUserClaims(c); claims != nil && claims.Namespace != "" {
+			overrideNs = claims.Namespace
+			logrus.Infof("自部署备份检测：自动填充 namespace=%s", overrideNs)
+		}
+	}
+
 	result, err := db.ImportBackupNs(payload, mode, overrideNs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
