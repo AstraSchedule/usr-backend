@@ -62,7 +62,8 @@ func TestGetSchedule_Empty(t *testing.T) {
 	assert.NotNil(t, resp["daily_class"])
 	assert.NotNil(t, resp["startup_behavior"])
 	assert.NotNil(t, resp["timetable"])
-	assert.NotNil(t, resp["subject"])
+	assert.NotNil(t, resp["subject_name"])
+	assert.NotNil(t, resp["divider"])
 }
 
 func TestGetSchedule_WithVersion(t *testing.T) {

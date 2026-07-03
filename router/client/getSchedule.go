@@ -97,7 +97,21 @@ func GetSchedule(c *gin.Context) {
 		SubjectConfig:     subject.SubjectConfig,
 		CountdownRecords:  filteredCountdowns,
 	}
-	// 覆盖 daily_class 为扁平化格式，展开 client_config 到顶层
+	// 确保嵌套 map 不为 nil，避免客户端收到 null
+	timetableMap := fullResponse.TimetableConfig.Timetable
+	if timetableMap == nil {
+		timetableMap = map[string]map[string]interface{}{}
+	}
+	dividerMap := fullResponse.TimetableConfig.Divider
+	if dividerMap == nil {
+		dividerMap = map[string][]int{}
+	}
+	subjectNameMap := fullResponse.SubjectConfig.SubjectName
+	if subjectNameMap == nil {
+		subjectNameMap = map[string]string{}
+	}
+
+	// 覆盖 daily_class 为扁平化格式，展开嵌套结构到顶层
 	fullResponseMap := map[string]interface{}{
 		"supportWebSocket":       fullResponse.SupportWebsocket,
 		"version":                fullResponse.Version,
@@ -110,8 +124,9 @@ func GetSchedule(c *gin.Context) {
 		"css_style":              fullResponse.CSSStyle,
 		"startup_behavior":       fullResponse.StartupBehavior,
 		"temperature_colors":     fullResponse.TemperatureColors,
-		"timetable":              fullResponse.TimetableConfig,
-		"subject":                fullResponse.SubjectConfig,
+		"timetable":              timetableMap,
+		"divider":                dividerMap,
+		"subject_name":           subjectNameMap,
 		"countdown":              fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
