@@ -60,7 +60,7 @@ func TestGetSchedule_Empty(t *testing.T) {
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NotNil(t, resp["daily_class"])
-	assert.NotNil(t, resp["client_config"])
+	assert.NotNil(t, resp["startup_behavior"])
 	assert.NotNil(t, resp["timetable"])
 	assert.NotNil(t, resp["subject"])
 }
