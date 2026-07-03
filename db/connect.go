@@ -40,7 +40,7 @@ func ConnectDb() *gorm.DB {
 				}
 			}
 			logrus.Infof("Connecting to SQLite database: %s", model.Configs.Db.Path)
-			dialector = gormsqlite.Open(fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_busy_timeout=5000", model.Configs.Db.Path))
+			dialector = gormsqlite.Open(fmt.Sprintf("%s?_busy_timeout=5000", model.Configs.Db.Path))
 		default:
 
 			cfg := mysql.NewConfig()
