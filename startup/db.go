@@ -43,6 +43,13 @@ func MigrateDb() {
 		db.GetDB().Exec("DROP INDEX IF EXISTS idx_unique_school_grade")
 	}
 
+	// 清理旧版（无 namespace）索引，确保 AutoMigrate 能重建包含 namespace 的新索引
+	db.GetDB().Exec("DROP INDEX IF EXISTS idx_schedules_school_grade_class")
+	db.GetDB().Exec("DROP INDEX IF EXISTS idx_client_configs_school_grade_class")
+	db.GetDB().Exec("DROP INDEX IF EXISTS idx_timetables_school_grade")
+	db.GetDB().Exec("DROP INDEX IF EXISTS idx_subjects_school_grade")
+	db.GetDB().Exec("DROP INDEX IF EXISTS idx_data_versions_school_grade_class")
+
 	err := db.GetDB().AutoMigrate(
 		&dbTable.Schedule{},
 		&dbTable.ClientConfig{},

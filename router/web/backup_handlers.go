@@ -60,10 +60,10 @@ func handleImportBackup(c *gin.Context, mode string) {
 		overrideNs = c.PostForm("namespace")
 	}
 
-	// 自动检测自部署备份：如果 SaaS 表记录没有 namespace，用当前用户的 namespace 填充
+	// 自动检测自部署备份：如果备份数据没有 namespace，用请求来源的 namespace 填充
 	if overrideNs == "" && len(payload.Schedules) > 0 && payload.Schedules[0].Namespace == "" {
-		if claims := middleware.GetUserClaims(c); claims != nil && claims.Namespace != "" {
-			overrideNs = claims.Namespace
+		if ns := middleware.GetNamespace(c); ns != "" {
+			overrideNs = ns
 			logrus.Infof("自部署备份检测：自动填充 namespace=%s", overrideNs)
 		}
 	}
