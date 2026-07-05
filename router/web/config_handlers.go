@@ -155,15 +155,7 @@ func parseTextItems(arr []interface{}) []textItem {
 	return items
 }
 
-func PutSubjects(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	school := c.Param("school")
-	grade := c.Param("grade")
-	var raw map[string]interface{}
-	if err := c.ShouldBindJSON(&raw); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+func parseSubjectsPayload(raw map[string]interface{}) subjectsPayload {
 	bodyMap := raw
 	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
 		bodyMap = modelVal
@@ -176,7 +168,10 @@ func PutSubjects(c *gin.Context) {
 	if arr, ok := bodyMap["fullName"].([]interface{}); ok {
 		body.FullName = parseTextItems(arr)
 	}
+	return body
+}
 
+func subjectsNameMap(body subjectsPayload) map[string]string {
 	m := map[string]string{}
 	limit := len(body.Abbr)
 	if len(body.FullName) < limit {
@@ -185,6 +180,19 @@ func PutSubjects(c *gin.Context) {
 	for i := 0; i < limit; i++ {
 		m[body.Abbr[i].Text] = body.FullName[i].Text
 	}
+	return m
+}
+
+func PutSubjects(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
+	school := c.Param("school")
+	grade := c.Param("grade")
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	m := subjectsNameMap(parseSubjectsPayload(raw))
 	record := dbTable.Subject{Namespace: ns, School: school, Grade: grade, SubjectConfig: dbTable.SubjectConfig{SubjectName: m}}
 	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
