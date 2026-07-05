@@ -405,13 +405,7 @@ func CopyConfig(c *gin.Context) {
 	})
 }
 
-func GetScheduleConfig(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	school := c.Param("school")
-	grade := c.Param("grade")
-	classNumber := c.Param("class_number")
-	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
-	timetable := db.GetTimetableNs(ns, school, grade)
+func maxTimetableSubjects(timetable dbTable.TimetableConfig) int {
 	maxSubjects := 0
 	for _, v := range timetable.Timetable {
 		for _, item := range v {
@@ -421,25 +415,39 @@ func GetScheduleConfig(c *gin.Context) {
 			}
 		}
 	}
+	return maxSubjects
+}
+
+func scheduleDayResponse(day dbTable.DailyClass, timetable dbTable.TimetableConfig, maxSubjects int) gin.H {
+	if _, ok := timetable.Timetable[day.Timetable]; !ok {
+		day.Timetable = "常日"
+	}
+	classList := make([][]string, 0, len(day.ClassList))
+	for _, s := range day.ClassList {
+		classList = append(classList, s)
+	}
+	for len(classList) < maxSubjects {
+		classList = append(classList, []string{"课"})
+	}
+	return gin.H{
+		"Chinese":   day.Chinese,
+		"English":   day.English,
+		"classList": classList,
+		"timetable": day.Timetable,
+	}
+}
+
+func GetScheduleConfig(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
+	school := c.Param("school")
+	grade := c.Param("grade")
+	classNumber := c.Param("class_number")
+	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
+	timetable := db.GetTimetableNs(ns, school, grade)
+	maxSubjects := maxTimetableSubjects(timetable.TimetableConfig)
 	out := make([]gin.H, 0, 7)
 	for i := 0; i < 7; i++ {
-		day := schedule.DailyClasses[i]
-		if _, ok := timetable.Timetable[day.Timetable]; !ok {
-			day.Timetable = "常日"
-		}
-		classList := make([][]string, 0, len(day.ClassList))
-		for _, s := range day.ClassList {
-			classList = append(classList, s)
-		}
-		for len(classList) < maxSubjects {
-			classList = append(classList, []string{"课"})
-		}
-		out = append(out, gin.H{
-			"Chinese":   day.Chinese,
-			"English":   day.English,
-			"classList": classList,
-			"timetable": day.Timetable,
-		})
+		out = append(out, scheduleDayResponse(schedule.DailyClasses[i], timetable.TimetableConfig, maxSubjects))
 	}
 	c.JSON(http.StatusOK, gin.H{"daily_class": out})
 }
