@@ -274,6 +274,114 @@ func validateCopyPayload(payload *copyConfigPayload) (fromClass, toClass string,
 	return fromClass, toClass, nil
 }
 
+type copySourceConfig struct {
+	Subject   dbTable.Subject
+	Timetable dbTable.Timetable
+	Schedule  dbTable.Schedule
+	Settings  dbTable.ClientConfig
+}
+
+type copyTargetConfig struct {
+	Subject   dbTable.Subject
+	Timetable dbTable.Timetable
+	Schedule  dbTable.Schedule
+	Settings  dbTable.ClientConfig
+}
+
+func loadCopySourceConfig(c *gin.Context, dbConn *gorm.DB, ns string, payload copyConfigPayload, fromClass string) (copySourceConfig, bool) {
+	var src copySourceConfig
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&src.Subject).Error; err != nil {
+		respondCopyError(c, err, "科目配置")
+		return src, false
+	}
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&src.Timetable).Error; err != nil {
+		respondCopyError(c, err, "作息配置")
+		return src, false
+	}
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&src.Schedule).Error; err != nil {
+		respondCopyError(c, err, "课程表配置")
+		return src, false
+	}
+	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&src.Settings).Error; err != nil {
+		respondCopyError(c, err, "通用设置配置")
+		return src, false
+	}
+	return src, true
+}
+
+func buildCopyTargetConfig(ns string, payload copyConfigPayload, toClass string, src copySourceConfig) copyTargetConfig {
+	targetTimetable := dbTable.Timetable{
+		Namespace: ns,
+		School:    payload.To.School,
+		Grade:     payload.To.Grade,
+		TimetableConfig: dbTable.TimetableConfig{
+			Start:     src.Timetable.Start,
+			Timetable: cloneTimetableMap(src.Timetable.Timetable),
+			Divider:   cloneDividerMap(src.Timetable.Divider),
+		},
+	}
+	syncTimetableDividerKeys(&targetTimetable.TimetableConfig)
+
+	return copyTargetConfig{
+		Subject: dbTable.Subject{
+			Namespace: ns,
+			School:    payload.To.School,
+			Grade:     payload.To.Grade,
+			SubjectConfig: dbTable.SubjectConfig{
+				SubjectName: cloneStringMap(src.Subject.SubjectName),
+			},
+		},
+		Timetable: targetTimetable,
+		Schedule: dbTable.Schedule{
+			Namespace:    ns,
+			School:       payload.To.School,
+			Grade:        payload.To.Grade,
+			Class:        toClass,
+			DailyClasses: cloneDailyClasses(src.Schedule.DailyClasses),
+		},
+		Settings: dbTable.ClientConfig{
+			Namespace: ns,
+			School:    payload.To.School,
+			Grade:     payload.To.Grade,
+			Class:     toClass,
+			ClientConfigItems: dbTable.ClientConfigItems{
+				CountdownTarget:      src.Settings.CountdownTarget,
+				WeatherAlertOverride: src.Settings.WeatherAlertOverride,
+				WeatherAlertBrief:    src.Settings.WeatherAlertBrief,
+				WeekDisplay:          src.Settings.WeekDisplay,
+				BannerText:           src.Settings.BannerText,
+				CSSStyle:             cloneStringMap(src.Settings.CSSStyle),
+				TemperatureColors:    src.Settings.TemperatureColors,
+				StartupBehavior:      src.Settings.StartupBehavior,
+			},
+		},
+	}
+}
+
+func saveCopyTargetConfig(c *gin.Context, tx *gorm.DB, target copyTargetConfig) bool {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&target.Subject).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&target.Timetable).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&target.Schedule).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&target.Settings).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 func CopyConfig(c *gin.Context) {
 	ns := middleware.GetNamespace(c)
 	var payload copyConfigPayload
@@ -289,76 +397,11 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	dbConn := db.GetDB()
-
-	var srcSubject dbTable.Subject
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcSubject).Error; err != nil {
-		respondCopyError(c, err, "科目配置")
+	src, ok := loadCopySourceConfig(c, dbConn, ns, payload, fromClass)
+	if !ok {
 		return
 	}
-
-	var srcTimetable dbTable.Timetable
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&srcTimetable).Error; err != nil {
-		respondCopyError(c, err, "作息配置")
-		return
-	}
-
-	var srcSchedule dbTable.Schedule
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSchedule).Error; err != nil {
-		respondCopyError(c, err, "课程表配置")
-		return
-	}
-
-	var srcSettings dbTable.ClientConfig
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&srcSettings).Error; err != nil {
-		respondCopyError(c, err, "通用设置配置")
-		return
-	}
-
-	targetSubject := dbTable.Subject{
-		Namespace: ns,
-		School:    payload.To.School,
-		Grade:     payload.To.Grade,
-		SubjectConfig: dbTable.SubjectConfig{
-			SubjectName: cloneStringMap(srcSubject.SubjectName),
-		},
-	}
-
-	targetTimetable := dbTable.Timetable{
-		Namespace: ns,
-		School:    payload.To.School,
-		Grade:     payload.To.Grade,
-		TimetableConfig: dbTable.TimetableConfig{
-			Start:     srcTimetable.Start,
-			Timetable: cloneTimetableMap(srcTimetable.Timetable),
-			Divider:   cloneDividerMap(srcTimetable.Divider),
-		},
-	}
-	syncTimetableDividerKeys(&targetTimetable.TimetableConfig)
-
-	targetSchedule := dbTable.Schedule{
-		Namespace:    ns,
-		School:       payload.To.School,
-		Grade:        payload.To.Grade,
-		Class:        toClass,
-		DailyClasses: cloneDailyClasses(srcSchedule.DailyClasses),
-	}
-
-	targetSettings := dbTable.ClientConfig{
-		Namespace: ns,
-		School:    payload.To.School,
-		Grade:     payload.To.Grade,
-		Class:     toClass,
-		ClientConfigItems: dbTable.ClientConfigItems{
-			CountdownTarget:      srcSettings.CountdownTarget,
-			WeatherAlertOverride: srcSettings.WeatherAlertOverride,
-			WeatherAlertBrief:    srcSettings.WeatherAlertBrief,
-			WeekDisplay:          srcSettings.WeekDisplay,
-			BannerText:           srcSettings.BannerText,
-			CSSStyle:             cloneStringMap(srcSettings.CSSStyle),
-			TemperatureColors:    srcSettings.TemperatureColors,
-			StartupBehavior:      srcSettings.StartupBehavior,
-		},
-	}
+	target := buildCopyTargetConfig(ns, payload, toClass, src)
 
 	tx := dbConn.Begin()
 	if tx.Error != nil {
@@ -371,24 +414,7 @@ func CopyConfig(c *gin.Context) {
 		}
 	}()
 
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetSubject).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetTimetable).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSchedule).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSettings).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !saveCopyTargetConfig(c, tx, target) {
 		return
 	}
 
