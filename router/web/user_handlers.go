@@ -101,6 +101,15 @@ type handlerError struct {
 	msg    string
 }
 
+type updateUserRequest struct {
+	Username           *string `json:"username"`
+	Password           *string `json:"password"`
+	Role               *string `json:"role"`
+	Scope              *string `json:"scope"`
+	MustChangePwd      *bool   `json:"must_change_pwd"`
+	MustChangeUsername *bool   `json:"must_change_username"`
+}
+
 var validRoles = map[string]bool{"admin": true, "school_w": true, "grade_w": true, "class_w": true, "readonly": true}
 
 func applyPasswordUpdate(user *dbTable.User, password string) *handlerError {
@@ -124,6 +133,32 @@ func applyRoleUpdate(user *dbTable.User, role string) *handlerError {
 	return nil
 }
 
+func applyUserUpdates(user *dbTable.User, req updateUserRequest) *handlerError {
+	if req.Username != nil {
+		user.Username = *req.Username
+	}
+	if req.Password != nil {
+		if err := applyPasswordUpdate(user, *req.Password); err != nil {
+			return err
+		}
+	}
+	if req.Role != nil {
+		if err := applyRoleUpdate(user, *req.Role); err != nil {
+			return err
+		}
+	}
+	if req.Scope != nil {
+		user.Scope = *req.Scope
+	}
+	if req.MustChangePwd != nil {
+		user.MustChangePwd = *req.MustChangePwd
+	}
+	if req.MustChangeUsername != nil {
+		user.MustChangeUsername = *req.MustChangeUsername
+	}
+	return nil
+}
+
 func UpdateUser(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -138,42 +173,15 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		Username           *string `json:"username"`
-		Password           *string `json:"password"`
-		Role               *string `json:"role"`
-		Scope              *string `json:"scope"`
-		MustChangePwd      *bool   `json:"must_change_pwd"`
-		MustChangeUsername *bool   `json:"must_change_username"`
-	}
+	var req updateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效参数"})
 		return
 	}
 
-	if req.Username != nil {
-		user.Username = *req.Username
-	}
-	if req.Password != nil {
-		if err := applyPasswordUpdate(user, *req.Password); err != nil {
-			c.JSON(err.status, gin.H{"detail": err.msg})
-			return
-		}
-	}
-	if req.Role != nil {
-		if err := applyRoleUpdate(user, *req.Role); err != nil {
-			c.JSON(err.status, gin.H{"detail": err.msg})
-			return
-		}
-	}
-	if req.Scope != nil {
-		user.Scope = *req.Scope
-	}
-	if req.MustChangePwd != nil {
-		user.MustChangePwd = *req.MustChangePwd
-	}
-	if req.MustChangeUsername != nil {
-		user.MustChangeUsername = *req.MustChangeUsername
+	if err := applyUserUpdates(user, req); err != nil {
+		c.JSON(err.status, gin.H{"detail": err.msg})
+		return
 	}
 
 	if err := db.UpdateUser(user); err != nil {
