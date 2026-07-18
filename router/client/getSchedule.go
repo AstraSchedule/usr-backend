@@ -110,7 +110,7 @@ func GetSchedule(c *gin.Context) {
 		"temperature_colors":     fullResponse.TemperatureColors,
 		"timetable":              fullResponse.TimetableConfig,
 		"subject":                fullResponse.SubjectConfig,
-		"countdown":              fullResponse.CountdownRecords,
+		"countdown_records":      fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
 }
