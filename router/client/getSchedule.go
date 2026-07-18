@@ -127,7 +127,7 @@ func GetSchedule(c *gin.Context) {
 		"timetable":              timetableMap,
 		"divider":                dividerMap,
 		"subject_name":           subjectNameMap,
-		"countdown":              fullResponse.CountdownRecords,
+		"countdown_records":      fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
 }
