@@ -326,13 +326,14 @@ func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
 
 	// 未配置天气认证时返回 403（不发起上游请求，也不计入统计）
 	origAPIKey := model.Configs.APIKey
-	model.Configs.APIKey = model.APIKeyConfig{}
+	model.Configs.APIKey.Weather = ""
 	t.Cleanup(func() { model.Configs.APIKey = origAPIKey })
 
 	router := setupTestRouter()
 	router.GET("/api/weather/", GetWeatherWithCFHeader)
 
-	// 使用未被其它测试缓存的城市，避免命中城市查询缓存走重试路径
+	// 清除城市查询缓存，确保缺少认证信息时先走认证校验。
+	cache.Delete("上海_上海")
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/weather/", nil)
 	req.Header.Set("CF-IPCity", "上海")
@@ -370,6 +371,10 @@ func TestGetWeatherWithCFHeader_Success(t *testing.T) {
 
 func TestWebSocketPlaceholder(t *testing.T) {
 	ensureTestDB()
+
+	origServerless := model.Configs.Run.Serverless
+	model.Configs.Run.Serverless = false
+	t.Cleanup(func() { model.Configs.Run.Serverless = origServerless })
 
 	router := setupTestRouter()
 	router.Any("/ws/:school/:grade/:class_number", WebSocketPlaceholder)
