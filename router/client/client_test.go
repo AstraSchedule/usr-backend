@@ -151,6 +151,11 @@ func TestGetSchedule_DataContract(t *testing.T) {
 	assert.Equal(t, "常日", day0["timetable"])
 	assert.Equal(t, []interface{}{"数", "语", "英"}, day0["classList"])
 
+	// 同一周内数据版本未变化时仍应返回 304。
+	v := resp["version"].(string)
+	w2 := doClientRequest(t, router, "GET", "/contract/2024/1?version="+v)
+	assert.Equal(t, http.StatusNotModified, w2.Code)
+
 	// subject_name / timetable / divider 映射
 	assert.Equal(t, "数学", resp["subject_name"].(map[string]interface{})["数"])
 	assert.Contains(t, resp["timetable"].(map[string]interface{}), "常日")
@@ -159,6 +164,17 @@ func TestGetSchedule_DataContract(t *testing.T) {
 	// 倒数日按 scope 过滤后返回
 	countdowns := resp["countdown_records"].([]interface{})
 	assert.Equal(t, 1, len(countdowns))
+}
+
+func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
+	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
+	assert.NotEqual(t, scheduleVersion(dataVersion, 1), scheduleVersion(dataVersion, 2))
+	assert.NotEqual(t, scheduleVersion(100, 2), scheduleVersion(101, 1))
+
+	parsedDataVersion, parsedWeekNumber, err := parseScheduleVersion(scheduleVersion(100, 2))
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), parsedDataVersion)
+	assert.Equal(t, 2, parsedWeekNumber)
 }
 
 func TestGetSchedule_NotModified(t *testing.T) {
