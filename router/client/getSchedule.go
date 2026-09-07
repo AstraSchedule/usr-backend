@@ -32,12 +32,17 @@ func GetSchedule(c *gin.Context) {
 			return
 		}
 	}
+	now := time.Now()
 	serverDataVersion := db.GetLatestVersionNs(ns, school, grade, class)
-	if clientDataVersion.Eq(serverDataVersion) {
+	schedule := db.GetScheduleNs(ns, school, grade, class)
+	timetable := db.GetTimetableNs(ns, school, grade)
+	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
+	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber)
+	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
-	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
+	_, _ = db.RefreshAutorunStatusesNs(ns, now)
 	clientConfig := db.GetClientConfigNs(ns, school, grade, class)
 
 	// 如果数据库中没有 temperature_colors 配置或 stops 为空，使用默认值
@@ -52,9 +57,7 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	schedule := db.GetScheduleNs(ns, school, grade, class)
 	subject := db.GetSubjectNs(ns, school, grade)
-	timetable := db.GetTimetableNs(ns, school, grade)
 	records, _ := db.FetchAutorunRecordsNs(ns, "")
 	resolvedDailyClasses := service.ApplyScheduleRules(
 		schedule.DailyClasses,

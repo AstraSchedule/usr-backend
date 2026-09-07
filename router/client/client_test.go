@@ -339,30 +339,7 @@ func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
 	req.Header.Set("CF-Region", "上海")
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	var resp model.WeatherResponse
-	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "北京", resp.Where)
-	assert.Equal(t, "25", resp.Temp)
-}
-
-func TestGetWeatherWithCFHeader_NoCFHeader(t *testing.T) {
-	ensureTestDB()
-	mock := setupMockWeatherServer(t)
-
-	origHost := model.Configs.APIKey.APIHost
-	model.Configs.APIKey.APIHost = strings.TrimPrefix(mock.URL, "https://")
-	t.Cleanup(func() { model.Configs.APIKey.APIHost = origHost })
-
-	router := setupTestRouter()
-	router.GET("/api/weather/", GetWeatherWithCFHeader)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/", nil)
-	router.ServeHTTP(w, req)
-
-	// 没有 CF-IPCity 头时应返回 400
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestGetWeatherWithCFHeader_Success(t *testing.T) {

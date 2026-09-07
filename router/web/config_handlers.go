@@ -583,7 +583,6 @@ func PutScheduleConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("daily_class[%d] 必须为对象", index)})
 			return
 		}
-		body.DailyClass = append(body.DailyClass, item)
 	}
 	body := parseSchedulePayload(raw)
 

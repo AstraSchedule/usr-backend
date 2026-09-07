@@ -214,7 +214,7 @@ func baseSchedule() [7]dbTable.DailyClass {
 
 func baseTimetable() map[string]map[string]interface{} {
 	return map[string]map[string]interface{}{
-		"常日": {"08:00-08:40": 0, "08:50-09:30": 1},
+		"常日":   {"08:00-08:40": 0, "08:50-09:30": 1},
 		"exam": {"09:00-10:00": 0},
 	}
 }

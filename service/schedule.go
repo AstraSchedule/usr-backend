@@ -265,7 +265,8 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 	if startDateStr == "" {
 		return 1
 	}
-		start, err := time.Parse(dateFormat, startDateStr)
+	location := now.Location()
+	start, err := time.ParseInLocation(dateFormat, startDateStr, location)
 	if err != nil {
 		return 1
 	}
