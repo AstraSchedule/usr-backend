@@ -388,12 +388,6 @@ func TestExportBackup_Empty(t *testing.T) {
 	assert.Equal(t, 1, payload.Meta.SchemaVersion)
 }
 
-func TestExportBackupNs_Empty(t *testing.T) {
-	// ExportBackupNs requires namespace filter, but autorun_records table may not have created_at column
-	// Skip this test on main branch due to schema differences
-	t.Skip("Skipping due to schema differences on main branch")
-}
-
 func TestImportBackup_Overwrite(t *testing.T) {
 	defer cleanupDB(t)
 

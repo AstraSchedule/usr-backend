@@ -279,9 +279,7 @@ func TestGetWeatherWithProvince_Success(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/api/weather/:name1/:name2", GetWeatherWithProvince)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/北京/朝阳", nil)
-	router.ServeHTTP(w, req)
+	w := doClientRequest(t, router, "GET", "/api/weather/北京/朝阳")
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.WeatherResponse
@@ -302,9 +300,7 @@ func TestGetWeatherWithCity_Success(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/api/weather/:name1", GetWeatherWithCity)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/北京", nil)
-	router.ServeHTTP(w, req)
+	w := doClientRequest(t, router, "GET", "/api/weather/北京")
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.WeatherResponse
@@ -319,12 +315,32 @@ func TestGetWeatherWithCFHeader_NoCFHeader(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/api/weather/", GetWeatherWithCFHeader)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/", nil)
-	router.ServeHTTP(w, req)
+	w := doClientRequest(t, router, "GET", "/api/weather/")
 
 	// 没有 CF-IPCity 头时应返回 400
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
+	ensureTestDB()
+
+	// 未配置天气认证时返回 403（不发起上游请求，也不计入统计）
+	origAPIKey := model.Configs.APIKey
+	model.Configs.APIKey.Weather = ""
+	t.Cleanup(func() { model.Configs.APIKey = origAPIKey })
+
+	router := setupTestRouter()
+	router.GET("/api/weather/", GetWeatherWithCFHeader)
+
+	// 清除城市查询缓存，确保缺少认证信息时先走认证校验。
+	cache.Delete("上海_上海")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/weather/", nil)
+	req.Header.Set("CF-IPCity", "上海")
+	req.Header.Set("CF-Region", "上海")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestGetWeatherWithCFHeader_Success(t *testing.T) {
@@ -356,15 +372,16 @@ func TestGetWeatherWithCFHeader_Success(t *testing.T) {
 func TestWebSocketPlaceholder(t *testing.T) {
 	ensureTestDB()
 
+	origServerless := model.Configs.Run.Serverless
+	model.Configs.Run.Serverless = false
+	t.Cleanup(func() { model.Configs.Run.Serverless = origServerless })
+
 	router := setupTestRouter()
 	router.Any("/ws/:school/:grade/:class_number", WebSocketPlaceholder)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/ws/school1/grade1/class1", nil)
-	router.ServeHTTP(w, req)
-
-	// WebSocket upgrade will fail in test, but handler should not panic
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusUpgradeRequired || w.Code == http.StatusBadRequest)
+	// 契约：普通 HTTP 请求（无 Upgrade 头）必须返回 400
+	w := doClientRequest(t, router, "GET", "/ws/school1/grade1/class1")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // BroadcastSync 内部广播测试（外部 /api/broadcast 入口已废弃移除，saas 版按租户 namespace 隔离）
