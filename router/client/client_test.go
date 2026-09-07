@@ -169,8 +169,12 @@ func TestGetSchedule_DataContract(t *testing.T) {
 func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
 	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
 	assert.NotEqual(t, scheduleVersion(dataVersion, 1), scheduleVersion(dataVersion, 2))
-	assert.Equal(t, dataVersion+1, scheduleVersion(dataVersion, 1))
-	assert.Equal(t, dataVersion+2, scheduleVersion(dataVersion, 2))
+	assert.NotEqual(t, scheduleVersion(100, 2), scheduleVersion(101, 1))
+
+	parsedDataVersion, parsedWeekNumber, err := parseScheduleVersion(scheduleVersion(100, 2))
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), parsedDataVersion)
+	assert.Equal(t, 2, parsedWeekNumber)
 }
 
 func TestGetSchedule_NotModified(t *testing.T) {

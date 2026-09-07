@@ -7,9 +7,9 @@ import (
 	"AstraScheduleServerGo/service"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/dromara/carbon/v2"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,16 +18,17 @@ func GetSchedule(c *gin.Context) {
 	grade := c.Param("grade")
 	class := c.Param("class")
 	version := c.Query("version") // 可能没有
-	clientDataVersion := carbon.CreateFromTimestamp(0)
+	clientDataVersion := int64(0)
+	clientWeekNumber := 0
 	if version != "" {
-		cDVInt, err := strconv.ParseInt(version, 10, 64)
+		var err error
+		clientDataVersion, clientWeekNumber, err = parseScheduleVersion(version)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{ // 400
 				"error": err.Error(),
 			})
 			return
 		}
-		clientDataVersion = carbon.CreateFromTimestamp(cDVInt)
 	}
 	now := time.Now()
 	serverDataVersion := db.GetLatestVersion(school, grade, class)
@@ -35,7 +36,7 @@ func GetSchedule(c *gin.Context) {
 	timetable := db.GetTimetable(school, grade)
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
 	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber)
-	if clientDataVersion.Eq(carbon.CreateFromTimestamp(effectiveVersion)) {
+	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
@@ -90,7 +91,7 @@ func GetSchedule(c *gin.Context) {
 
 	fullResponse := model.FullResponseConfig{
 		SupportWebsocket:  model.Configs.WebSocketEnabled(),
-		Version:           strconv.FormatInt(effectiveVersion, 10),
+		Version:           effectiveVersion,
 		DailyClasses:      resolvedDailyClasses,
 		ClientConfigItems: clientConfig.ClientConfigItems,
 		TimetableConfig:   timetable.TimetableConfig,
@@ -132,9 +133,33 @@ func GetSchedule(c *gin.Context) {
 	c.JSON(http.StatusOK, fullResponseMap)
 }
 
-func scheduleVersion(dataVersion int64, weekNumber int) int64 {
+func scheduleVersion(dataVersion int64, weekNumber int) string {
 	if weekNumber < 1 {
 		weekNumber = 1
 	}
-	return dataVersion + int64(weekNumber)
+	return strconv.FormatInt(dataVersion, 10) + ":" + strconv.Itoa(weekNumber)
+}
+
+func parseScheduleVersion(version string) (int64, int, error) {
+	parts := strings.Split(version, ":")
+	if len(parts) == 1 {
+		// 兼容旧客户端发送的纯数据版本；week=0 保证不会误命中新的复合版本。
+		dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
+		return dataVersion, 0, err
+	}
+	if len(parts) != 2 {
+		return 0, 0, strconv.ErrSyntax
+	}
+	dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	weekNumber, err := strconv.Atoi(parts[1])
+	if err != nil || weekNumber < 1 {
+		if err == nil {
+			err = strconv.ErrSyntax
+		}
+		return 0, 0, err
+	}
+	return dataVersion, weekNumber, nil
 }
