@@ -263,15 +263,27 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 	if startDateStr == "" {
 		return 1
 	}
-	start, err := time.Parse("2006-01-02", startDateStr)
+	location := now.Location()
+	start, err := time.ParseInLocation("2006-01-02", startDateStr, location)
 	if err != nil {
 		return 1
 	}
-	days := int(now.Sub(start).Hours() / 24)
+	// 周数按周一切分：开学日期所在周为第 1 周，而不是从开学日连续计数 7 天。
+	// 将归一化后的日期放到 UTC 再计算，避免本地时区/DST 造成小时差偏移。
+	startMonday := mondayDateUTC(start)
+	currentMonday := mondayDateUTC(now.In(location))
+	days := int(currentMonday.Sub(startMonday).Hours() / 24)
 	if days < 0 {
 		return 1
 	}
 	return days/7 + 1
+}
+
+func mondayDateUTC(date time.Time) time.Time {
+	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	daysSinceMonday := (int(date.Weekday()) + 6) % 7
+	date = date.AddDate(0, 0, -daysSinceMonday)
+	return time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // ResolveClassList 根据当前周数解析 classList
@@ -281,6 +293,9 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 func ResolveClassList(classList dbTable.ClassList, weekNumber int) []string {
 	if len(classList) == 0 {
 		return []string{}
+	}
+	if weekNumber < 1 {
+		weekNumber = 1
 	}
 	resolved := make([]string, 0, len(classList))
 	for _, item := range classList {

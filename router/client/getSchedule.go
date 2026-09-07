@@ -29,12 +29,17 @@ func GetSchedule(c *gin.Context) {
 		}
 		clientDataVersion = carbon.CreateFromTimestamp(cDVInt)
 	}
+	now := time.Now()
 	serverDataVersion := db.GetLatestVersion(school, grade, class)
-	if clientDataVersion.Eq(serverDataVersion) {
+	schedule := db.GetSchedule(school, grade, class)
+	timetable := db.GetTimetable(school, grade)
+	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
+	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber)
+	if clientDataVersion.Eq(carbon.CreateFromTimestamp(effectiveVersion)) {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
-	_, _ = db.RefreshAutorunStatuses(time.Now())
+	_, _ = db.RefreshAutorunStatuses(now)
 	clientConfig := db.GetClientConfig(school, grade, class)
 
 	// 如果数据库中没有 temperature_colors 配置或 stops 为空，使用默认值
@@ -49,9 +54,7 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	schedule := db.GetSchedule(school, grade, class)
 	subject := db.GetSubject(school, grade)
-	timetable := db.GetTimetable(school, grade)
 	records, _ := db.FetchAutorunRecords("")
 	resolvedDailyClasses := service.ApplyScheduleRules(
 		schedule.DailyClasses,
@@ -60,11 +63,10 @@ func GetSchedule(c *gin.Context) {
 		school,
 		grade,
 		class,
-		time.Now(),
+		now,
 	)
 
 	// 根据当前周数解析多周轮换课程，生成扁平的 classList
-	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, time.Now())
 	type dailyClassFlat struct {
 		Chinese   string   `json:"Chinese"`
 		English   string   `json:"English"`
@@ -88,7 +90,7 @@ func GetSchedule(c *gin.Context) {
 
 	fullResponse := model.FullResponseConfig{
 		SupportWebsocket:  model.Configs.WebSocketEnabled(),
-		Version:           strconv.FormatInt(serverDataVersion.Timestamp(), 10),
+		Version:           strconv.FormatInt(effectiveVersion, 10),
 		DailyClasses:      resolvedDailyClasses,
 		ClientConfigItems: clientConfig.ClientConfigItems,
 		TimetableConfig:   timetable.TimetableConfig,
@@ -128,4 +130,11 @@ func GetSchedule(c *gin.Context) {
 		"countdown_records":      fullResponse.CountdownRecords,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
+}
+
+func scheduleVersion(dataVersion int64, weekNumber int) int64 {
+	if weekNumber < 1 {
+		weekNumber = 1
+	}
+	return dataVersion + int64(weekNumber)
 }
