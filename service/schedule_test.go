@@ -57,9 +57,28 @@ func TestCalcWeekNumber_ExactSevenDays(t *testing.T) {
 	assert.Equal(t, 2, result)
 }
 
+func TestCalcWeekNumber_UsesMondayBoundary(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, location) // 周二
+
+	assert.Equal(t, 1, CalcWeekNumber("2026-09-01", start))
+	assert.Equal(t, 1, CalcWeekNumber("2026-09-01", time.Date(2026, 9, 6, 23, 59, 0, 0, location)))
+	assert.Equal(t, 2, CalcWeekNumber("2026-09-01", time.Date(2026, 9, 7, 0, 0, 0, 0, location)))
+}
+
+func TestCalcWeekNumber_UsesCalendarDatesAcrossTimeZones(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	assert.Equal(t, 2, CalcWeekNumber("2026-09-01", time.Date(2026, 9, 8, 0, 0, 0, 0, location)))
+}
+
 func TestResolveClassList_Empty(t *testing.T) {
 	result := ResolveClassList(dbTable.ClassList{}, 1)
 	assert.Equal(t, []string{}, result)
+}
+
+func TestResolveClassList_InvalidWeekDefaultsToFirst(t *testing.T) {
+	cl := dbTable.ClassList{{"数", "语"}}
+	assert.Equal(t, []string{"数"}, ResolveClassList(cl, 0))
 }
 
 func TestResolveClassList_SingleWeek(t *testing.T) {

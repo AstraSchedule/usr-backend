@@ -279,9 +279,7 @@ func TestGetWeatherWithProvince_Success(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/api/weather/:name1/:name2", GetWeatherWithProvince)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/北京/朝阳", nil)
-	router.ServeHTTP(w, req)
+	w := doClientRequest(t, router, "GET", "/api/weather/北京/朝阳")
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.WeatherResponse
@@ -302,8 +300,43 @@ func TestGetWeatherWithCity_Success(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/api/weather/:name1", GetWeatherWithCity)
 
+	w := doClientRequest(t, router, "GET", "/api/weather/北京")
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp model.WeatherResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "北京", resp.Where)
+	assert.Equal(t, "25", resp.Temp)
+}
+
+func TestGetWeatherWithCFHeader_NoCFHeader(t *testing.T) {
+	ensureTestDB()
+
+	router := setupTestRouter()
+	router.GET("/api/weather/", GetWeatherWithCFHeader)
+
+	w := doClientRequest(t, router, "GET", "/api/weather/")
+
+	// 没有 CF-IPCity 头时应返回 400
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
+	ensureTestDB()
+
+	// 未配置天气认证时返回 403（不发起上游请求，也不计入统计）
+	origAPIKey := model.Configs.APIKey
+	model.Configs.APIKey = model.APIKeyConfig{}
+	t.Cleanup(func() { model.Configs.APIKey = origAPIKey })
+
+	router := setupTestRouter()
+	router.GET("/api/weather/", GetWeatherWithCFHeader)
+
+	// 使用未被其它测试缓存的城市，避免命中城市查询缓存走重试路径
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/北京", nil)
+	req, _ := http.NewRequest("GET", "/api/weather/", nil)
+	req.Header.Set("CF-IPCity", "上海")
+	req.Header.Set("CF-Region", "上海")
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -315,6 +348,11 @@ func TestGetWeatherWithCity_Success(t *testing.T) {
 
 func TestGetWeatherWithCFHeader_NoCFHeader(t *testing.T) {
 	ensureTestDB()
+	mock := setupMockWeatherServer(t)
+
+	origHost := model.Configs.APIKey.APIHost
+	model.Configs.APIKey.APIHost = strings.TrimPrefix(mock.URL, "https://")
+	t.Cleanup(func() { model.Configs.APIKey.APIHost = origHost })
 
 	router := setupTestRouter()
 	router.GET("/api/weather/", GetWeatherWithCFHeader)
@@ -359,12 +397,9 @@ func TestWebSocketPlaceholder(t *testing.T) {
 	router := setupTestRouter()
 	router.Any("/ws/:school/:grade/:class_number", WebSocketPlaceholder)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/ws/school1/grade1/class1", nil)
-	router.ServeHTTP(w, req)
-
-	// WebSocket upgrade will fail in test, but handler should not panic
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusUpgradeRequired || w.Code == http.StatusBadRequest)
+	// 契约：普通 HTTP 请求（无 Upgrade 头）必须返回 400
+	w := doClientRequest(t, router, "GET", "/ws/school1/grade1/class1")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // BroadcastSync 内部广播测试（外部 /api/broadcast 入口已废弃移除，saas 版按租户 namespace 隔离）

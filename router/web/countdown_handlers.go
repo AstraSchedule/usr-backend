@@ -183,6 +183,18 @@ func PutCountdownRule(c *gin.Context) {
 			return
 		}
 	}
+	// 更新前取回旧作用域：scope 变更时，旧作用域的客户端同样需要刷新通知
+	var oldScopes []string
+	if rows, err := db.FetchCountdownRecords(recordID); err == nil && len(rows) > 0 {
+		oldScopes = rows[0].Scope
+	}
+	// 更新已有记录时，旧作用域同样必须在本用户权限内：防止小权限用户借 recordID
+	// 覆盖包含无权作用域的记录（新作用域已在前面校验过）
+	for _, s := range oldScopes {
+		if !middleware.CheckUserScopeString(c, s) {
+			return
+		}
+	}
 	record := dbTable.CountdownRecord{
 		ID:        recordID,
 		Namespace: ns,
