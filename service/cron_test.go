@@ -65,6 +65,16 @@ func TestCronSpec_StepAndRange(t *testing.T) {
 	assert.False(t, spec.match(time.Date(2026, time.September, 1, 6, 10, 0, 0, time.UTC)))
 }
 
+func TestCronSpec_NextKeepsLaterHitInSameHour(t *testing.T) {
+	// 每小时的 0 分与 30 分命中：08:15 的下一次必须是 08:30，不能跳到 09:00
+	spec, ok := ParseCron("0,30 * * * *")
+	require.True(t, ok)
+
+	next, ok := spec.Next(time.Date(2026, time.September, 1, 8, 15, 0, 0, time.UTC))
+	require.True(t, ok)
+	assert.Equal(t, time.Date(2026, time.September, 1, 8, 30, 0, 0, time.UTC), next)
+}
+
 func TestCronSpec_RareExpressionBeyondOneYear(t *testing.T) {
 	// 2 月 29 日：相邻两次命中可能相隔 4 年（甚至 8 年），搜索窗口必须覆盖
 	spec, ok := ParseCron("0 0 29 2 *")
