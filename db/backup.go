@@ -253,8 +253,11 @@ func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string
 		onConflict = clause.OnConflict{
 			Columns: []clause.Column{{Name: "hash_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
+				"name",
 				"e_type",
 				"scope",
+				"disabled",
+				"entries",
 				"parameters",
 				"level",
 				"status",

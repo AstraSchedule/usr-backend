@@ -168,13 +168,88 @@ func TestGetSchedule_DataContract(t *testing.T) {
 
 func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
 	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
-	assert.NotEqual(t, scheduleVersion(dataVersion, 1), scheduleVersion(dataVersion, 2))
-	assert.NotEqual(t, scheduleVersion(100, 2), scheduleVersion(101, 1))
+	assert.NotEqual(t, scheduleVersion(dataVersion, 1, 0), scheduleVersion(dataVersion, 2, 0))
+	assert.NotEqual(t, scheduleVersion(100, 2, 0), scheduleVersion(101, 1, 0))
+	// 变化点（下一次配置变更时刻）同样参与版本比较
+	assert.NotEqual(t, scheduleVersion(100, 2, 1000), scheduleVersion(100, 2, 2000))
 
-	parsedDataVersion, parsedWeekNumber, err := parseScheduleVersion(scheduleVersion(100, 2))
+	parsedDataVersion, parsedWeekNumber, parsedBoundary, err := parseScheduleVersion(scheduleVersion(100, 2, 0))
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), parsedDataVersion)
 	assert.Equal(t, 2, parsedWeekNumber)
+	assert.Equal(t, int64(0), parsedBoundary)
+
+	_, _, parsedBoundary, err = parseScheduleVersion(scheduleVersion(100, 2, 42))
+	assert.NoError(t, err)
+	assert.Equal(t, int64(42), parsedBoundary)
+
+	_, _, _, err = parseScheduleVersion("1:2:3:4")
+	assert.Error(t, err)
+	_, _, _, err = parseScheduleVersion("1:2:not-a-number")
+	assert.Error(t, err)
+}
+
+// 有后续变化点的自动任务（这里用「明天生效的单日调休」）会把变化点写进版本，
+// 客户端越过该时刻后版本必然不同，从而在周内拿到新配置而不是一直吃 304。
+func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
+	ensureTestDB()
+
+	now := time.Now()
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{
+		School: "dyn", Grade: "2024", Class: "1",
+		Version: now,
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "dyn-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"dyn"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: now.AddDate(0, 0, 1).Format("2006-01-02")},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	w := doClientRequest(t, router, "GET", "/dyn/2024/1")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在后续变化点时版本应带变化点")
+}
+
+// 已过期的单日规则不会再改变课表：版本里不应出现变化点，否则历史任务会永久破坏 304 缓存
+func TestGetSchedule_ExpiredRuleKeepsCache(t *testing.T) {
+	ensureTestDB()
+
+	now := time.Now()
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{
+		School: "cached", Grade: "2024", Class: "1",
+		Version: now,
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "expired-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"cached"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: now.AddDate(0, 0, -30).Format("2006-01-02")},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	w := doClientRequest(t, router, "GET", "/cached/2024/1")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	assert.Regexp(t, `^\d+:\d+$`, version, "过期规则不应产生变化点")
+
+	// 再请求一次仍然命中 304
+	w2 := doClientRequest(t, router, "GET", "/cached/2024/1?version="+version)
+	assert.Equal(t, http.StatusNotModified, w2.Code)
 }
 
 func TestGetSchedule_NotModified(t *testing.T) {
@@ -489,4 +564,86 @@ func TestBroadcastSync_DeliversToConnectedClient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SyncConfig", string(msg))
 	assert.Equal(t, 0, BroadcastSync("other", "school"))
+}
+
+// 自动任务 v2：客户端配置规则随课表响应下发，范围条件按日期命中
+func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
+	ensureTestDB()
+
+	database := db.GetDB()
+	// 使用独立 scope，避免与其它测试共享数据
+	database.Save(&dbTable.Schedule{
+		School: "autorun", Grade: "2024", Class: "1",
+		DailyClasses: [7]dbTable.DailyClass{
+			{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}}},
+		},
+	})
+	database.Save(&dbTable.Timetable{
+		School: "autorun", Grade: "2024",
+		TimetableConfig: dbTable.TimetableConfig{
+			Timetable: map[string]map[string]interface{}{"常日": {"08:00-08:40": 0}, "exam": {"09:00-09:40": 0}},
+			Divider:   map[string][]int{"常日": {}},
+			Start:     "2020-09-01",
+		},
+	})
+	// 覆盖极宽的日期范围：断言不受当前日期影响
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "range-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"autorun"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2000-01-01", EndDate: "2099-12-31"},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "cfg-rule", EType: dbTable.AutorunTypeClientConfig, Scope: []string{"autorun/2024/1"}, Level: 5,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenEvent, Event: dbTable.AutorunEventClassStart, Period: 1},
+			Action: map[string]interface{}{"settings": map[string]interface{}{"isWindowAlwaysOnTop": true}},
+		}},
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "cfg-other-class", EType: dbTable.AutorunTypeClientConfig, Scope: []string{"autorun/2024/2"}, Level: 5,
+		Entries: []dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"settings": map[string]interface{}{"isAlwaysMinimized": true}}}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	// 处理函数在请求开始时取 now，这里把请求前后的星期都视为合法：
+	// 避免断言时重新读时间在跨零点时抖动
+	before := time.Now().Weekday()
+	w := doClientRequest(t, router, "GET", "/autorun/2024/1")
+	after := time.Now().Weekday()
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// 新增的调度基准字段
+	assert.Contains(t, resp, "week_number")
+	assert.Equal(t, "2020-09-01", resp["term_start"])
+
+	// 日期范围条件命中：作息表替换只作用于「今天」对应的星期（与 v1 行为一致）
+	dailyClass, ok := resp["daily_class"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, dailyClass, 7)
+	appliedDays := make([]int, 0, 2)
+	for idx, day := range dailyClass {
+		if day.(map[string]interface{})["timetable"] == "exam" {
+			appliedDays = append(appliedDays, idx)
+		}
+	}
+	require.Len(t, appliedDays, 1, "应恰好替换一天的作息表")
+	assert.Contains(t, []int{int(before), int(after)}, appliedDays[0], "被替换的应当是请求当天")
+
+	// 客户端配置规则只下发本班作用域命中的条目
+	rules, ok := resp["client_config_rules"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, rules, 1)
+	rule := rules[0].(map[string]interface{})
+	assert.Equal(t, "cfg-rule", rule["taskId"])
+	assert.Equal(t, float64(5), rule["priority"])
+	settings, ok := rule["settings"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, settings["isWindowAlwaysOnTop"])
 }

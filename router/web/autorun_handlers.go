@@ -4,6 +4,8 @@ import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/service"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,7 +16,17 @@ import (
 const (
 	invalidArgPrefix = "无效参数: "
 	dateLayout       = "2006-01-02"
+	// msgTimetableRequired 作息表 ID 缺失时的统一提示（TIMETABLE / ALL 与旧接口共用）
+	msgTimetableRequired = "timetableId 必须为非空字符串"
 )
+
+// clientConfigSettingKeys 自动任务可以覆盖的桌面端本地配置项（白名单）
+var clientConfigSettingKeys = map[string]bool{
+	"isWindowAlwaysOnTop":    true, // 窗口置顶
+	"isDuringClassHidden":    true, // 上课隐藏
+	"isAlwaysMinimized":      true, // 始终缩小
+	"isDuringClassCountdown": true, // 课上计时
+}
 
 func badRequestDetail(c *gin.Context, detail string) {
 	c.JSON(http.StatusBadRequest, gin.H{"detail": detail})
@@ -24,88 +36,390 @@ func badRequestInvalidArg(c *gin.Context, detail string) {
 	badRequestDetail(c, invalidArgPrefix+detail)
 }
 
+func isValidDate(value string) bool {
+	_, err := time.Parse(dateLayout, value)
+	return err == nil
+}
+
 func validateDateField(c *gin.Context, fieldName string, value string) bool {
-	if _, err := time.Parse(dateLayout, value); err != nil {
+	if !isValidDate(value) {
 		badRequestInvalidArg(c, fieldName+" 格式错误")
 		return false
 	}
 	return true
 }
 
-func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
-	scope := parseScopeInput(payload.Scope)
-	// 作用域校验：非 admin 用户规则范围不能超出自身 scope（按数据库当前角色与作用域判定）；
-	// ALL 级规则仅 admin 可写，防止校/级/班写角色越权下发全局规则
-	for _, s := range scope {
-		if !middleware.CheckUserScopeString(c, s) {
-			return
+// validateScheduleAction 校验课程表内容（SCHEDULE / ALL 共用）
+func validateScheduleAction(action map[string]interface{}) string {
+	scheduleObj, ok := action["schedule"].(map[string]interface{})
+	if !ok {
+		return "schedule 必须为对象"
+	}
+	if _, ok := scheduleObj["periods"].([]interface{}); !ok {
+		return "schedule.periods 必须为数组"
+	}
+	return ""
+}
+
+// validateClientConfigAction 校验客户端配置内容
+func validateClientConfigAction(action map[string]interface{}) string {
+	settings, ok := action["settings"].(map[string]interface{})
+	if !ok || len(settings) == 0 {
+		return "settings 必须为非空对象"
+	}
+	for key, value := range settings {
+		if !clientConfigSettingKeys[key] {
+			return "settings 含不支持的配置项: " + key
+		}
+		if _, ok := value.(bool); !ok {
+			return "settings." + key + " 必须为布尔值"
 		}
 	}
+	return ""
+}
+
+// validateEntryAction 校验条目内容，返回错误详情（空串表示通过）
+func validateEntryAction(etype int, action map[string]interface{}) string {
+	if len(action) == 0 {
+		return "action 不能为空"
+	}
+	switch etype {
+	case dbTable.AutorunTypeCompensation:
+		useDate, _ := action["useDate"].(string)
+		if !isValidDate(useDate) {
+			return "useDate 格式错误"
+		}
+	case dbTable.AutorunTypeTimetable:
+		if id, _ := action["timetableId"].(string); id == "" {
+			return msgTimetableRequired
+		}
+	case dbTable.AutorunTypeSchedule:
+		return validateScheduleAction(action)
+	case dbTable.AutorunTypeAll:
+		if id, _ := action["timetableId"].(string); id == "" {
+			return msgTimetableRequired
+		}
+		return validateScheduleAction(action)
+	case dbTable.AutorunTypeClientConfig:
+		return validateClientConfigAction(action)
+	default:
+		return "type 必须为 0-" + strconv.Itoa(dbTable.AutorunTypeClientConfig)
+	}
+	return ""
+}
+
+func validateConditionWeekdays(days []int) string {
+	for _, day := range days {
+		if day < 0 || day > 6 {
+			return "when.weekdays 取值必须为 0-6"
+		}
+	}
+	return ""
+}
+
+func validateOptionalDate(value, fieldName string) string {
+	if value == "" || isValidDate(value) {
+		return ""
+	}
+	return "when." + fieldName + " 格式错误"
+}
+
+func validateRangeCondition(when *dbTable.AutorunCondition) string {
+	if !isValidDate(when.StartDate) {
+		return "when.startDate 格式错误"
+	}
+	// endDate 可省略：表示从 startDate 起长期生效
+	if detail := validateOptionalDate(when.EndDate, "endDate"); detail != "" {
+		return detail
+	}
+	if when.EndDate != "" && when.StartDate > when.EndDate {
+		return "when.startDate 不能晚于 when.endDate"
+	}
+	return ""
+}
+
+func validateWeeklyCondition(when *dbTable.AutorunCondition) string {
+	if when.EveryWeeks <= 0 {
+		return "when.everyWeeks 必须为正整数"
+	}
+	if when.WeekOffset < 0 || when.WeekOffset >= when.EveryWeeks {
+		return "when.weekOffset 必须落在 0 到 everyWeeks-1 之间"
+	}
+	if detail := validateOptionalDate(when.StartDate, "startDate"); detail != "" {
+		return detail
+	}
+	if detail := validateOptionalDate(when.EndDate, "endDate"); detail != "" {
+		return detail
+	}
+	if when.StartDate != "" && when.EndDate != "" && when.StartDate > when.EndDate {
+		return "when.startDate 不能晚于 when.endDate"
+	}
+	return ""
+}
+
+// validateEventCondition 时刻事件只由桌面端本地求值：课表类任务在服务端解析，
+// 无法判定节次时刻，直接拒绝以免被误解为「全天生效」
+func validateEventCondition(when *dbTable.AutorunCondition, etype int) string {
+	if etype != dbTable.AutorunTypeClientConfig {
+		return "when.kind=event 仅支持客户端配置类型"
+	}
+	switch when.Event {
+	case dbTable.AutorunEventClassStart, dbTable.AutorunEventClassEnd:
+		if when.Period <= 0 {
+			return "when.period 必须为正整数"
+		}
+		return ""
+	case dbTable.AutorunEventStartup:
+		return ""
+	default:
+		return "when.event 不受支持"
+	}
+}
+
+func validateCronCondition(when *dbTable.AutorunCondition) string {
+	if !service.IsValidCron(when.Cron) {
+		return "when.cron 不是合法的 5 字段表达式"
+	}
+	if when.Duration < 0 {
+		return "when.duration 不能为负数"
+	}
+	return ""
+}
+
+// validateEntryCondition 校验生效条件，返回错误详情（空串表示通过）。
+// etype 用于限制只在客户端求值的条件（时刻事件）不被课表类任务使用。
+func validateEntryCondition(when *dbTable.AutorunCondition, etype int) string {
+	if when == nil {
+		return ""
+	}
+	if detail := validateConditionWeekdays(when.Weekdays); detail != "" {
+		return detail
+	}
+	switch when.Kind {
+	case dbTable.AutorunWhenDate:
+		if !isValidDate(when.Date) {
+			return "when.date 格式错误"
+		}
+		return ""
+	case dbTable.AutorunWhenRange:
+		return validateRangeCondition(when)
+	case dbTable.AutorunWhenWeekly:
+		return validateWeeklyCondition(when)
+	case dbTable.AutorunWhenEvent:
+		return validateEventCondition(when, etype)
+	case dbTable.AutorunWhenCron:
+		return validateCronCondition(when)
+	default:
+		return "when.kind 不受支持"
+	}
+}
+
+// checkAutorunScope 校验作用域写权限（新建作用域与旧作用域都必须在权限内），失败时已写入响应
+func checkAutorunScope(c *gin.Context, scopes ...[]string) bool {
+	for _, list := range scopes {
+		for _, s := range list {
+			if !middleware.CheckUserScopeString(c, s) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// loadAutorunRecord 读取既有任务，用于取回旧作用域与创建时间
+func loadAutorunRecord(hashID string) (dbTable.AutorunRecord, bool) {
 	if hashID == "" {
-		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
+		return dbTable.AutorunRecord{}, false
 	}
-	// 更新前取回旧作用域：scope 变更时，旧作用域的客户端同样需要刷新通知
-	var oldScopes []string
-	if rows, err := db.FetchAutorunRecords(hashID); err == nil && len(rows) > 0 {
-		oldScopes = rows[0].Scope
+	rows, err := db.FetchAutorunRecords(hashID)
+	if err != nil || len(rows) == 0 {
+		return dbTable.AutorunRecord{}, false
 	}
-	// 更新已有记录时，旧作用域同样必须在本用户权限内：防止小权限用户借 hashID
-	// 覆盖包含无权作用域的记录（新作用域已在前面校验过）
-	for _, s := range oldScopes {
-		if !middleware.CheckUserScopeString(c, s) {
-			return
-		}
-	}
-	record := dbTable.AutorunRecord{HashID: hashID, EType: payload.Type, Scope: scope, Parameters: params, Level: payload.Priority, Status: 0}
+	return rows[0], true
+}
+
+// saveAutorunRecord 落库并刷新状态、广播刷新（失败时已写入响应）
+func saveAutorunRecord(c *gin.Context, record dbTable.AutorunRecord, oldScopes []string) bool {
 	if err := db.UpsertAutorunRecord(&record); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return false
 	}
 	_, _ = db.RefreshAutorunStatuses(time.Now())
 	// 规则变更影响课表解析，按新旧作用域并集广播刷新
-	broadcastScopes(mergeScopes(oldScopes, scope))
-	c.JSON(http.StatusOK, gin.H{"status": 200, "id": hashID})
+	broadcastScopes(mergeScopes(oldScopes, record.Scope))
+	c.JSON(http.StatusOK, gin.H{"status": 200, "id": record.HashID})
+	return true
+}
+
+// persistAutorunRule 兼容 v1 的按类型写入：内容被包装成任务内的唯一一条条目
+func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
+	scope := parseScopeInput(payload.Scope)
+	if !checkAutorunScope(c, scope) {
+		return
+	}
+	existing, found := loadAutorunRecord(hashID)
+	if hashID == "" {
+		hashID = makeHashID(payload.Type, scope, payload.Priority, params)
+		existing, found = loadAutorunRecord(hashID)
+	}
+	if found && !checkAutorunScope(c, existing.Scope) {
+		return
+	}
+	record := dbTable.AutorunRecord{
+		HashID:     hashID,
+		EType:      payload.Type,
+		Scope:      scope,
+		Parameters: params,
+		Level:      payload.Priority,
+		Status:     0,
+	}
+	if found {
+		record.CreatedAt = existing.CreatedAt
+	}
+	saveAutorunRecord(c, record, existing.Scope)
+}
+
+// PutAutorunTask 统一任务写入接口：一个任务携带若干条目（单日/范围/每周轮换/事件/cron）
+func PutAutorunTask(c *gin.Context) {
+	var payload autorunTaskPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		badRequestInvalidArg(c, err.Error())
+		return
+	}
+	if payload.Type < 0 || payload.Type > dbTable.AutorunTypeClientConfig {
+		badRequestInvalidArg(c, "type 必须为 0-"+strconv.Itoa(dbTable.AutorunTypeClientConfig))
+		return
+	}
+	if len(payload.Entries) == 0 {
+		badRequestInvalidArg(c, "entries 不能为空")
+		return
+	}
+	entries := make([]dbTable.AutorunEntry, 0, len(payload.Entries))
+	for i, input := range payload.Entries {
+		if detail := validateEntryAction(payload.Type, input.Action); detail != "" {
+			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
+			return
+		}
+		if detail := validateEntryCondition(input.When, payload.Type); detail != "" {
+			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
+			return
+		}
+		entries = append(entries, dbTable.AutorunEntry{
+			ID:       entryID(input.ID, i),
+			Disabled: input.Enabled != nil && !*input.Enabled,
+			Note:     input.Note,
+			When:     input.When,
+			Action:   input.Action,
+		})
+	}
+	scope := parseScopeInput(payload.Scope)
+	if !checkAutorunScope(c, scope) {
+		return
+	}
+	existing, found := loadAutorunRecord(payload.ID)
+	if found && !checkAutorunScope(c, existing.Scope) {
+		return
+	}
+	hashID := payload.ID
+	if hashID == "" {
+		hashID = makeTaskHashID(payload.Type, scope, payload.Priority, payload.Name, entries)
+		existing, found = loadAutorunRecord(hashID)
+	}
+	record := dbTable.AutorunRecord{
+		HashID:     hashID,
+		Name:       payload.Name,
+		EType:      payload.Type,
+		Scope:      scope,
+		Disabled:   payload.Enabled != nil && !*payload.Enabled,
+		Entries:    entries,
+		Parameters: map[string]interface{}{},
+		Level:      payload.Priority,
+		Status:     0,
+	}
+	if found {
+		record.CreatedAt = existing.CreatedAt
+	}
+	saveAutorunRecord(c, record, existing.Scope)
+}
+
+func entryID(raw string, index int) string {
+	if raw != "" {
+		return raw
+	}
+	return "e" + strconv.Itoa(index+1)
+}
+
+// entryContentOut 导出条目内容；v1 的单日规则把日期并回内容，保持旧契约不变
+func entryContentOut(entry dbTable.AutorunEntry) map[string]interface{} {
+	content := make(map[string]interface{}, len(entry.Action))
+	for k, v := range entry.Action {
+		content[k] = v
+	}
+	if entry.When != nil && (entry.When.Kind == "" || entry.When.Kind == dbTable.AutorunWhenDate) && entry.When.Date != "" {
+		content["date"] = entry.When.Date
+	}
+	return content
+}
+
+func autorunTypeName(etype int) string {
+	switch etype {
+	case dbTable.AutorunTypeCompensation:
+		return "COMPENSATION"
+	case dbTable.AutorunTypeTimetable:
+		return "TIMETABLE"
+	case dbTable.AutorunTypeSchedule:
+		return "SCHEDULE"
+	case dbTable.AutorunTypeAll:
+		return "ALL"
+	case dbTable.AutorunTypeClientConfig:
+		return "CLIENT_CONFIG"
+	default:
+		return strconv.Itoa(etype)
+	}
+}
+
+func autorunStatusText(status int) string {
+	switch status {
+	case 0:
+		return "待生效"
+	case 1:
+		return "生效中"
+	case 2:
+		return "已过期"
+	default:
+		return "未知"
+	}
 }
 
 func mapAutorunRecord(r dbTable.AutorunRecord) gin.H {
+	entries := service.EntriesOf(r)
 	content := map[string]interface{}{}
-	if r.Parameters != nil {
-		if rule, ok := r.Parameters["rule"].(map[string]interface{}); ok {
-			content = rule
-		} else {
-			content = r.Parameters
-		}
+	entriesOut := make([]gin.H, 0, len(entries))
+	for _, entry := range entries {
+		entriesOut = append(entriesOut, gin.H{
+			"id":      entry.ID,
+			"enabled": !entry.Disabled,
+			"note":    entry.Note,
+			"when":    entry.When,
+			"action":  entry.Action,
+			"content": entryContentOut(entry),
+		})
 	}
-
-	typeName := strconv.Itoa(r.EType)
-	switch r.EType {
-	case dbTable.AutorunTypeCompensation:
-		typeName = "COMPENSATION"
-	case dbTable.AutorunTypeTimetable:
-		typeName = "TIMETABLE"
-	case dbTable.AutorunTypeSchedule:
-		typeName = "SCHEDULE"
-	case dbTable.AutorunTypeAll:
-		typeName = "ALL"
-	}
-
-	statusText := "未知"
-	switch r.Status {
-	case 0:
-		statusText = "待生效"
-	case 1:
-		statusText = "生效中"
-	case 2:
-		statusText = "已过期"
+	// v1 兼容：content 取首条条目的内容
+	if len(entries) > 0 {
+		content = entryContentOut(entries[0])
 	}
 
 	return gin.H{
 		"id":       r.HashID,
-		"type":     typeName,
+		"name":     r.Name,
+		"type":     autorunTypeName(r.EType),
 		"priority": r.Level,
-		"status":   statusText,
+		"status":   autorunStatusText(r.Status),
+		"enabled":  !r.Disabled,
 		"scope":    r.Scope,
 		"content":  content,
+		"entries":  entriesOut,
 	}
 }
 
@@ -159,17 +473,27 @@ func DeleteAutorunRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
 
-func PutCompensationRule(c *gin.Context) {
+// bindAutorunContent 读取 v1 载荷的 content 字段
+func bindAutorunContent(c *gin.Context) (autorunPayload, map[string]interface{}, bool) {
 	var payload autorunPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		badRequestInvalidArg(c, err.Error())
+		return payload, nil, false
+	}
+	if payload.Content == nil {
+		payload.Content = map[string]interface{}{}
+	}
+	return payload, payload.Content, true
+}
+
+func PutCompensationRule(c *gin.Context) {
+	payload, content, ok := bindAutorunContent(c)
+	if !ok {
 		return
 	}
-	if payload.Type != 0 {
-		payload.Type = 0
-	}
-	dateStr, _ := payload.Content["date"].(string)
-	useDateStr, _ := payload.Content["useDate"].(string)
+	payload.Type = dbTable.AutorunTypeCompensation
+	dateStr, _ := content["date"].(string)
+	useDateStr, _ := content["useDate"].(string)
 	if !validateDateField(c, "date", dateStr) {
 		return
 	}
@@ -181,25 +505,24 @@ func PutCompensationRule(c *gin.Context) {
 }
 
 func PutTimetableRule(c *gin.Context) {
-	var payload autorunPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		badRequestInvalidArg(c, err.Error())
+	payload, content, ok := bindAutorunContent(c)
+	if !ok {
 		return
 	}
-	payload.Type = 1
-	dateStr, _ := payload.Content["date"].(string)
-	timetableID, _ := payload.Content["timetableId"].(string)
+	payload.Type = dbTable.AutorunTypeTimetable
+	timetableID, _ := content["timetableId"].(string)
 	if timetableID == "" {
-		badRequestInvalidArg(c, "timetableId 必须为非空字符串")
+		badRequestInvalidArg(c, msgTimetableRequired)
 		return
 	}
+	dateStr, _ := content["date"].(string)
 	if !validateDateField(c, "date", dateStr) {
 		return
 	}
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "timetableId": timetableID}}
 	hashID := payload.ID
 	if hashID == "" {
-		if idInContent, ok := payload.Content["id"].(string); ok {
+		if idInContent, ok := content["id"].(string); ok {
 			hashID = idInContent
 		}
 	}
@@ -207,54 +530,44 @@ func PutTimetableRule(c *gin.Context) {
 }
 
 func PutScheduleRule(c *gin.Context) {
-	var payload autorunPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		badRequestInvalidArg(c, err.Error())
-		return
-	}
-	payload.Type = 2
-	dateStr, _ := payload.Content["date"].(string)
-	scheduleObj, ok := payload.Content["schedule"].(map[string]interface{})
+	payload, content, ok := bindAutorunContent(c)
 	if !ok {
-		badRequestDetail(c, "content.schedule 必须为对象")
 		return
 	}
-	if _, ok := scheduleObj["periods"].([]interface{}); !ok {
-		badRequestDetail(c, "content.schedule.periods 必须为数组")
+	payload.Type = dbTable.AutorunTypeSchedule
+	dateStr, _ := content["date"].(string)
+	if detail := validateScheduleAction(content); detail != "" {
+		badRequestDetail(c, detail)
 		return
 	}
 	if !validateDateField(c, "date", dateStr) {
 		return
 	}
+	scheduleObj := content["schedule"].(map[string]interface{})
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "schedule": map[string]interface{}{"periods": scheduleObj["periods"]}}}
 	persistAutorunRule(c, payload, params, "")
 }
 
 func PutAllRule(c *gin.Context) {
-	var payload autorunPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		badRequestInvalidArg(c, err.Error())
-		return
-	}
-	payload.Type = 3
-	dateStr, _ := payload.Content["date"].(string)
-	timetableID, _ := payload.Content["timetableId"].(string)
-	if timetableID == "" {
-		badRequestDetail(c, "content.timetableId 必须为非空字符串")
-		return
-	}
-	scheduleObj, ok := payload.Content["schedule"].(map[string]interface{})
+	payload, content, ok := bindAutorunContent(c)
 	if !ok {
-		badRequestDetail(c, "content.schedule 必须为对象")
 		return
 	}
-	if _, ok := scheduleObj["periods"].([]interface{}); !ok {
-		badRequestDetail(c, "content.schedule.periods 必须为数组")
+	payload.Type = dbTable.AutorunTypeAll
+	dateStr, _ := content["date"].(string)
+	timetableID, _ := content["timetableId"].(string)
+	if timetableID == "" {
+		badRequestDetail(c, msgTimetableRequired)
+		return
+	}
+	if detail := validateScheduleAction(content); detail != "" {
+		badRequestDetail(c, detail)
 		return
 	}
 	if !validateDateField(c, "date", dateStr) {
 		return
 	}
+	scheduleObj := content["schedule"].(map[string]interface{})
 	params := map[string]interface{}{"rule": map[string]interface{}{"date": dateStr, "timetableId": timetableID, "schedule": map[string]interface{}{"periods": scheduleObj["periods"]}}}
 	persistAutorunRule(c, payload, params, "")
 }

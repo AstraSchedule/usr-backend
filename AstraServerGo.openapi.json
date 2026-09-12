@@ -1076,6 +1076,59 @@
         "security": [{ "jwtAuth": [] }]
       }
     },
+    "/web/autorun/task": {
+      "put": {
+        "summary": "新增/更新自动任务（v2 统一接口）",
+        "description": "一个任务由任务级字段（名称/类型/生效域/优先级/启停）与若干条目组成；条目条件支持单日、日期范围、每 N 周、时刻事件与 cron。需要 JWT 认证（Authorization: Bearer），写操作还需通过 X-Verify-Password 请求头（或请求体 password 字段）校验密码；时刻事件条件仅客户端配置类型可用。",
+        "operationId": "putAutorunTask",
+        "tags": ["web-autorun"],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AutorunTaskPayload" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "自动任务写入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AutorunPutSuccess" }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "401": { "description": "JWT 或写操作密码校验失败" },
+          "403": {
+            "description": "作用域越权",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "错误响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" }
+              }
+            }
+          }
+        },
+        "security": [{ "jwtAuth": [] }]
+      }
+    },
     "/web/autorun/compensation": {
       "put": {
         "summary": "新增/更新调休规则",
@@ -2364,11 +2417,21 @@
             "required": ["supportWebSocket", "version"],
             "properties": {
               "supportWebSocket": { "type": "boolean" },
-              "version": { "type": "string", "description": "Unix 时间戳秒" },
+              "version": {
+                "type": "string",
+                "description": "缓存版本，格式为 dataVersion:weekNumber[:boundary]。boundary 是该班课表下一次可能变化的时刻（Unix 秒），仅在存在后续变化点时出现；客户端回传同格式的 version 即可命中 304"
+              },
               "countdown_records": {
                 "type": "array",
                 "items": { "$ref": "#/components/schemas/CountdownRecordView" },
                 "description": "倒数日配置列表（已按 scope 过滤）"
+              },
+              "week_number": { "type": "integer", "description": "当前学期周次（周一切分，供客户端本地调度周期条件）" },
+              "term_start": { "type": "string", "description": "学期起始日期（YYYY-MM-DD）" },
+              "client_config_rules": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/ClientConfigRuleView" },
+                "description": "客户端配置规则（已按 scope 过滤，时间条件由桌面端本地求值）"
               }
             }
           }
@@ -2580,15 +2643,17 @@
         "type": "object",
         "properties": {
           "id": { "type": "string", "description": "HashID" },
+          "name": { "type": "string", "description": "任务名称" },
           "type": {
             "type": "string",
-            "description": "任务类型：COMPENSATION(0) | TIMETABLE(1) | SCHEDULE(2) | ALL(3)"
+            "description": "任务类型：COMPENSATION(0) | TIMETABLE(1) | SCHEDULE(2) | ALL(3) | CLIENT_CONFIG(4)"
           },
           "priority": { "type": "integer" },
           "status": {
             "type": "string",
             "description": "任务状态：待生效 | 生效中 | 已过期"
           },
+          "enabled": { "type": "boolean", "description": "任务是否启用（停用的任务不参与课表解析）" },
           "scope": {
             "type": "array",
             "items": { "type": "string" },
@@ -2597,7 +2662,108 @@
           "content": {
             "type": "object",
             "additionalProperties": true,
-            "description": "规则内容（根据 type 不同结构不同）"
+            "description": "v1 兼容字段：取首条条目的内容"
+          },
+          "entries": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AutorunEntryView" },
+            "description": "任务内全部条目"
+          }
+        }
+      },
+      "AutorunCondition": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "生效条件类型：date 单日 | range 日期范围 | weekly 每 N 周 | event 时刻事件 | cron 表达式"
+          },
+          "date": { "type": "string", "format": "date", "description": "kind=date：单日日期" },
+          "startDate": { "type": "string", "format": "date", "description": "kind=range/weekly：起始日期（range 必填），weekly 同时作为周期锚点" },
+          "endDate": { "type": "string", "format": "date", "description": "结束日期（含当天），留空表示不设终点（长期生效）" },
+          "everyWeeks": { "type": "integer", "minimum": 1, "description": "kind=weekly：每 N 周" },
+          "weekOffset": { "type": "integer", "minimum": 0, "description": "kind=weekly：周期内第几个槽位（0 起）" },
+          "weekdays": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0, "maximum": 6 },
+            "description": "限定星期（0=周日 … 6=周六），留空为不限"
+          },
+          "event": { "type": "string", "description": "kind=event：startup 启动 | class_start 第 N 节课开始 | class_end 第 N 节课结束" },
+          "period": { "type": "integer", "minimum": 1, "description": "kind=event：第几节课" },
+          "cron": { "type": "string", "description": "kind=cron：5 字段表达式（分 时 日 月 周）" },
+          "duration": { "type": "integer", "minimum": 0, "description": "kind=cron：命中后持续分钟数，0 表示持续到下一次命中" }
+        }
+      },
+      "AutorunEntryView": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "note": { "type": "string" },
+          "when": { "$ref": "#/components/schemas/AutorunCondition" },
+          "action": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "条目内容（根据任务类型不同结构不同）"
+          },
+          "content": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "v1 兼容：单日条目的日期会并回内容"
+          }
+        }
+      },
+      "AutorunEntryPayload": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "id": { "type": "string", "description": "可选；不传时按顺序生成" },
+          "enabled": { "type": "boolean", "description": "缺省为 true" },
+          "note": { "type": "string" },
+          "when": { "$ref": "#/components/schemas/AutorunCondition" },
+          "action": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "AutorunTaskPayload": {
+        "type": "object",
+        "required": ["type", "entries"],
+        "properties": {
+          "id": { "type": "string", "description": "可选；不传时按内容生成，编辑时传入以保持主键不变" },
+          "name": { "type": "string", "description": "任务名称" },
+          "type": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "scope": { "$ref": "#/components/schemas/ScopeField" },
+          "priority": { "type": "integer" },
+          "enabled": { "type": "boolean", "description": "缺省为 true" },
+          "entries": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/AutorunEntryPayload" }
+          }
+        }
+      },
+      "ClientConfigRuleView": {
+        "type": "object",
+        "description": "下发桌面端本地调度的客户端配置规则（时间条件由客户端求值）",
+        "properties": {
+          "taskId": { "type": "string" },
+          "name": { "type": "string" },
+          "entryId": { "type": "string" },
+          "priority": { "type": "integer" },
+          "scope": { "type": "string", "description": "命中的最具体作用域" },
+          "specificity": { "type": "integer", "description": "作用域具体度（0=ALL，1=学校，2=年级，3=班级）" },
+          "when": { "$ref": "#/components/schemas/AutorunCondition" },
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "description": "要覆盖的桌面端本地设置；未出现的键表示不覆盖（客户端保持用户本地设置）",
+            "properties": {
+              "isWindowAlwaysOnTop": { "type": "boolean", "description": "窗口置顶" },
+              "isDuringClassHidden": { "type": "boolean", "description": "上课隐藏" },
+              "isAlwaysMinimized": { "type": "boolean", "description": "始终缩小" },
+              "isDuringClassCountdown": { "type": "boolean", "description": "课上计时" }
+            }
           }
         }
       },

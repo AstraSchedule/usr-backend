@@ -5,6 +5,7 @@ import (
 	"AstraScheduleServerGo/router/client"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,39 @@ func parseScopeInput(raw interface{}) []string {
 func makeHashID(etype int, scope []string, level int, parameters map[string]interface{}) string {
 	sum := sha256.Sum256([]byte(strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + stableMapString(parameters)))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// makeTaskHashID 生成 v2 任务的稳定哈希 ID（类型 + 优先级 + 作用域 + 名称 + 条目内容）。
+// 用 JSON 编码而不是手工拼接：JSON 对 map 键排序，且字段边界明确，
+// 不会出现 "a=b|c=d" 与 "a=b|c=d" 这类手工拼接导致的歧义碰撞。
+// v1 的 makeHashID 保持不变，旧规则的 ID 不会漂移。
+func makeTaskHashID(etype int, scope []string, level int, name string, entries []dbTable.AutorunEntry) string {
+	payload := struct {
+		Type    int                    `json:"type"`
+		Level   int                    `json:"level"`
+		Scope   []string               `json:"scope"`
+		Name    string                 `json:"name"`
+		Entries []dbTable.AutorunEntry `json:"entries"`
+	}{
+		Type:    etype,
+		Level:   level,
+		Scope:   sortedScope(scope),
+		Name:    name,
+		Entries: entries,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// 条目内容均来自 JSON 请求体，理论上不会出错；退化为不含条目的哈希保证仍然稳定
+		raw = []byte(strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + name)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func sortedScope(scope []string) []string {
+	copyScope := append([]string(nil), scope...)
+	sort.Strings(copyScope)
+	return copyScope
 }
 
 func stringsFromScope(scope []string) string {
