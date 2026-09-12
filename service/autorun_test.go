@@ -210,6 +210,65 @@ func TestTaskStatus_EmptyEntries(t *testing.T) {
 	assert.Equal(t, 0, TaskStatus(record, day(2026, time.September, 1, 12)))
 }
 
+func TestTaskWindow_UnionKeepsUnboundedSide(t *testing.T) {
+	// 一条单日条目 + 一条无终点的每周轮换条目：单日条目结束后任务整体仍应「生效中」
+	record := dbTable.AutorunRecord{
+		EType: dbTable.AutorunTypeTimetable,
+		Entries: []dbTable.AutorunEntry{
+			{ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"}, Action: map[string]interface{}{"timetableId": "exam"}},
+			{ID: "e2", When: weeklyCondition(2, 0), Action: map[string]interface{}{"timetableId": "A"}},
+		},
+	}
+	assert.Equal(t, 1, TaskStatus(record, day(2026, time.September, 1, 12)))
+	assert.Equal(t, 1, TaskStatus(record, day(2026, time.October, 1, 12)), "无终点条目的并集不应被判为已过期")
+}
+
+func TestTaskStatus_DisabledEntriesIgnored(t *testing.T) {
+	record := dbTable.AutorunRecord{
+		EType: dbTable.AutorunTypeTimetable,
+		Entries: []dbTable.AutorunEntry{
+			{ID: "e1", Disabled: true, When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"}, Action: map[string]interface{}{"timetableId": "exam"}},
+		},
+	}
+	// 全部条目停用：任务等同于空任务，不应该被停用条目拖成「生效中」
+	assert.Equal(t, 0, TaskStatus(record, day(2026, time.September, 1, 12)))
+
+	withEnabled := record
+	withEnabled.Entries = append(withEnabled.Entries, dbTable.AutorunEntry{ID: "e2", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-05"}, Action: map[string]interface{}{"timetableId": "A"}})
+	assert.Equal(t, 0, TaskStatus(withEnabled, day(2026, time.September, 1, 12)), "只有尚未开始的启用条目")
+	assert.Equal(t, 1, TaskStatus(withEnabled, day(2026, time.September, 5, 12)))
+	assert.Equal(t, 2, TaskStatus(withEnabled, day(2026, time.September, 6, 12)))
+}
+
+func TestDynamicVersionBucket(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+	weekOnly := dbTable.AutorunRecord{
+		EType: dbTable.AutorunTypeTimetable, Scope: []string{"ALL"},
+		Entries: []dbTable.AutorunEntry{{ID: "e1", When: weeklyCondition(2, 0), Action: map[string]interface{}{"timetableId": "A"}}},
+	}
+	// 纯周次条件在周内不会变化，版本不需要时间桶（保持 304 缓存）
+	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
+
+	dated := dbTable.AutorunRecord{
+		EType: dbTable.AutorunTypeTimetable, Scope: []string{"s"},
+		Entries: []dbTable.AutorunEntry{{ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"}, Action: map[string]interface{}{"timetableId": "A"}}},
+	}
+	bucket := DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now)
+	assert.NotEqual(t, "", bucket)
+	// 同一个 5 分钟桶内保持稳定，跨桶变化
+	assert.Equal(t, bucket, DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now.Add(2*time.Minute)))
+	assert.NotEqual(t, bucket, DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now.Add(6*time.Minute)))
+
+	// 作用域不匹配 / 任务停用 / 客户端配置类型都不产生时间桶
+	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "other", "g", "c", now))
+	disabled := dated
+	disabled.Disabled = true
+	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{disabled}, "s", "g", "c", now))
+	clientConfig := dated
+	clientConfig.EType = dbTable.AutorunTypeClientConfig
+	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{clientConfig}, "s", "g", "c", now))
+}
+
 func TestCollectClientConfigRules_FiltersByScopeAndType(t *testing.T) {
 	settings := map[string]interface{}{"isWindowAlwaysOnTop": true}
 	records := []dbTable.AutorunRecord{

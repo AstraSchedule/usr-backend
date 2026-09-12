@@ -126,6 +126,12 @@ func TestPutAutorunTask_InvalidPayloads(t *testing.T) {
 	whenBody := func(when map[string]interface{}) map[string]interface{} {
 		return timetableTaskBody([]map[string]interface{}{{"when": when, "action": map[string]interface{}{"timetableId": "exam"}}})
 	}
+	clientConfigEventBody := func(when map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"type": dbTable.AutorunTypeClientConfig, "scope": []string{"ALL"},
+			"entries": []map[string]interface{}{{"when": when, "action": map[string]interface{}{"settings": map[string]interface{}{"isWindowAlwaysOnTop": true}}}},
+		}
+	}
 
 	cases := []struct {
 		name string
@@ -144,8 +150,9 @@ func TestPutAutorunTask_InvalidPayloads(t *testing.T) {
 		{"周期结束日非法", whenBody(map[string]interface{}{"kind": "weekly", "everyWeeks": 2, "endDate": "x"})},
 		{"cron 非法", whenBody(map[string]interface{}{"kind": "cron", "cron": "bad"})},
 		{"cron 负数时长", whenBody(map[string]interface{}{"kind": "cron", "cron": "0 8 * * *", "duration": -1})},
-		{"事件不支持", whenBody(map[string]interface{}{"kind": "event", "event": "unknown"})},
-		{"事件节次非法", whenBody(map[string]interface{}{"kind": "event", "event": "class_start", "period": 0})},
+		{"时刻事件不支持课表类任务", whenBody(map[string]interface{}{"kind": "event", "event": "class_start", "period": 1})},
+		{"事件不支持", clientConfigEventBody(map[string]interface{}{"kind": "event", "event": "unknown"})},
+		{"事件节次非法", clientConfigEventBody(map[string]interface{}{"kind": "event", "event": "class_start", "period": 0})},
 		{"条件类型不支持", whenBody(map[string]interface{}{"kind": "unknown"})},
 		{"星期越界", whenBody(map[string]interface{}{"kind": "date", "date": "2026-09-01", "weekdays": []int{9}})},
 		{"空内容", timetableTaskBody([]map[string]interface{}{{"action": map[string]interface{}{}}})},
@@ -210,6 +217,55 @@ func TestPutAutorunTask_ScheduleAndCompensation(t *testing.T) {
 	content := autorunContent(t, item)
 	assert.Equal(t, "2026-10-02", content["date"], "v1 契约：单日条目的日期并回 content")
 	assert.Equal(t, "2026-09-29", content["useDate"])
+}
+
+// 日期范围允许省略结束日期：表示从起始日起长期生效
+func TestPutAutorunTask_OpenEndedRange(t *testing.T) {
+	ensureTestDB()
+	router := taskRouter(t)
+
+	body := timetableTaskBody([]map[string]interface{}{
+		{
+			"when":   map[string]interface{}{"kind": "range", "startDate": "2026-09-07"},
+			"action": map[string]interface{}{"timetableId": "exam"},
+		},
+	})
+	w := doRequest(t, router, "PUT", "/web/autorun/task", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	item := fetchAutorunDetail(t, router, w)
+	entries := item["entries"].([]interface{})
+	require.Len(t, entries, 1)
+	when := entries[0].(map[string]interface{})["when"].(map[string]interface{})
+	assert.Equal(t, "2026-09-07", when["startDate"])
+	assert.NotContains(t, when, "endDate")
+}
+
+// 时刻事件只对客户端配置类型开放（课表类任务由服务端解析，无法判定节次时刻）
+func TestPutAutorunTask_EventConditionAllowedOnlyForClientConfig(t *testing.T) {
+	ensureTestDB()
+	router := taskRouter(t)
+
+	eventWhen := map[string]interface{}{"kind": "event", "event": "class_start", "period": 1}
+	clientConfigBody := map[string]interface{}{
+		"type": dbTable.AutorunTypeClientConfig, "scope": []string{"ALL"}, "priority": 1,
+		"entries": []map[string]interface{}{{
+			"when":   eventWhen,
+			"action": map[string]interface{}{"settings": map[string]interface{}{"isWindowAlwaysOnTop": true}},
+		}},
+	}
+	w := doRequest(t, router, "PUT", "/web/autorun/task", clientConfigBody)
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	scheduleBody := map[string]interface{}{
+		"type": dbTable.AutorunTypeTimetable, "scope": []string{"ALL"}, "priority": 1,
+		"entries": []map[string]interface{}{{
+			"when":   eventWhen,
+			"action": map[string]interface{}{"timetableId": "exam"},
+		}},
+	}
+	w = doRequest(t, router, "PUT", "/web/autorun/task", scheduleBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }
 
 func TestPutAutorunTask_UpdateKeepsIDAndCreatedAt(t *testing.T) {

@@ -106,8 +106,9 @@ func validateEntryAction(etype int, action map[string]interface{}) string {
 	return ""
 }
 
-// validateEntryCondition 校验生效条件，返回错误详情（空串表示通过）
-func validateEntryCondition(when *dbTable.AutorunCondition) string {
+// validateEntryCondition 校验生效条件，返回错误详情（空串表示通过）。
+// etype 用于限制只在客户端求值的条件（时刻事件）不被课表类任务使用。
+func validateEntryCondition(when *dbTable.AutorunCondition, etype int) string {
 	if when == nil {
 		return ""
 	}
@@ -125,11 +126,14 @@ func validateEntryCondition(when *dbTable.AutorunCondition) string {
 		if !isValidDate(when.StartDate) {
 			return "when.startDate 格式错误"
 		}
-		if !isValidDate(when.EndDate) {
-			return "when.endDate 格式错误"
-		}
-		if when.StartDate > when.EndDate {
-			return "when.startDate 不能晚于 when.endDate"
+		// endDate 可省略：表示从 startDate 起长期生效
+		if when.EndDate != "" {
+			if !isValidDate(when.EndDate) {
+				return "when.endDate 格式错误"
+			}
+			if when.StartDate > when.EndDate {
+				return "when.startDate 不能晚于 when.endDate"
+			}
 		}
 	case dbTable.AutorunWhenWeekly:
 		if when.EveryWeeks <= 0 {
@@ -145,6 +149,10 @@ func validateEntryCondition(when *dbTable.AutorunCondition) string {
 			return "when.endDate 格式错误"
 		}
 	case dbTable.AutorunWhenEvent:
+		// 时刻事件只由桌面端本地求值：课表类任务在服务端解析，无法判定节次时刻，直接拒绝以免误解为「全天生效」
+		if etype != dbTable.AutorunTypeClientConfig {
+			return "when.kind=event 仅支持客户端配置类型"
+		}
 		if when.Event == dbTable.AutorunEventClassStart || when.Event == dbTable.AutorunEventClassEnd {
 			if when.Period <= 0 {
 				return "when.period 必须为正整数"
@@ -253,7 +261,7 @@ func PutAutorunTask(c *gin.Context) {
 			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
 			return
 		}
-		if detail := validateEntryCondition(input.When); detail != "" {
+		if detail := validateEntryCondition(input.When, payload.Type); detail != "" {
 			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
 			return
 		}

@@ -20,9 +20,10 @@ func GetSchedule(c *gin.Context) {
 	version := c.Query("version") // 可能没有
 	clientDataVersion := int64(0)
 	clientWeekNumber := 0
+	clientDynamicBucket := ""
 	if version != "" {
 		var err error
-		clientDataVersion, clientWeekNumber, err = parseScheduleVersion(version)
+		clientDataVersion, clientWeekNumber, clientDynamicBucket, err = parseScheduleVersion(version)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{ // 400
 				"error": err.Error(),
@@ -34,9 +35,13 @@ func GetSchedule(c *gin.Context) {
 	serverDataVersion := db.GetLatestVersion(school, grade, class)
 	schedule := db.GetSchedule(school, grade, class)
 	timetable := db.GetTimetable(school, grade)
+	records, _ := db.FetchAutorunRecords("")
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
-	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber)
-	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber {
+	// 单日/日期范围/cron 等条件可能在同一周内改变命中结果，这类任务存在时用 5 分钟时间桶
+	// 迫使客户端在周内重新拉取；没有这类任务时桶为空，304 缓存照常生效
+	dynamicBucket := service.DynamicVersionBucket(records, school, grade, class, now)
+	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber, dynamicBucket)
+	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber && clientDynamicBucket == dynamicBucket {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
@@ -56,7 +61,6 @@ func GetSchedule(c *gin.Context) {
 		}
 	}
 	subject := db.GetSubject(school, grade)
-	records, _ := db.FetchAutorunRecords("")
 	resolvedDailyClasses := service.ApplyScheduleRulesCtx(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
@@ -139,33 +143,43 @@ func GetSchedule(c *gin.Context) {
 	c.JSON(http.StatusOK, fullResponseMap)
 }
 
-func scheduleVersion(dataVersion int64, weekNumber int) string {
+// scheduleVersion 生成客户端缓存版本：dataVersion:weekNumber[:dynamicBucket]
+// dynamicBucket 只在存在「周内可能改变」的自动任务时出现，用于让客户端在周内重新拉取。
+func scheduleVersion(dataVersion int64, weekNumber int, dynamicBucket string) string {
 	if weekNumber < 1 {
 		weekNumber = 1
 	}
-	return strconv.FormatInt(dataVersion, 10) + ":" + strconv.Itoa(weekNumber)
+	version := strconv.FormatInt(dataVersion, 10) + ":" + strconv.Itoa(weekNumber)
+	if dynamicBucket != "" {
+		version += ":" + dynamicBucket
+	}
+	return version
 }
 
-func parseScheduleVersion(version string) (int64, int, error) {
+func parseScheduleVersion(version string) (int64, int, string, error) {
 	parts := strings.Split(version, ":")
 	if len(parts) == 1 {
 		// 兼容旧客户端发送的纯数据版本；week=0 保证不会误命中新的复合版本。
 		dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
-		return dataVersion, 0, err
+		return dataVersion, 0, "", err
 	}
-	if len(parts) != 2 {
-		return 0, 0, strconv.ErrSyntax
+	if len(parts) > 3 {
+		return 0, 0, "", strconv.ErrSyntax
 	}
 	dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", err
 	}
 	weekNumber, err := strconv.Atoi(parts[1])
 	if err != nil || weekNumber < 1 {
 		if err == nil {
 			err = strconv.ErrSyntax
 		}
-		return 0, 0, err
+		return 0, 0, "", err
 	}
-	return dataVersion, weekNumber, nil
+	dynamicBucket := ""
+	if len(parts) == 3 {
+		dynamicBucket = parts[2]
+	}
+	return dataVersion, weekNumber, dynamicBucket, nil
 }

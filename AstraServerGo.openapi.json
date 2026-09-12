@@ -1079,7 +1079,7 @@
     "/web/autorun/task": {
       "put": {
         "summary": "新增/更新自动任务（v2 统一接口）",
-        "description": "一个任务由任务级字段（名称/类型/生效域/优先级/启停）与若干条目组成；条目条件支持单日、日期范围、每 N 周、时刻事件与 cron。需要 BasicAuth 认证。",
+        "description": "一个任务由任务级字段（名称/类型/生效域/优先级/启停）与若干条目组成；条目条件支持单日、日期范围、每 N 周、时刻事件与 cron。需要 JWT 认证（Authorization: Bearer），写操作还需通过 X-Verify-Password 请求头（或请求体 password 字段）校验密码；时刻事件条件仅客户端配置类型可用。",
         "operationId": "putAutorunTask",
         "tags": ["web-autorun"],
         "parameters": [],
@@ -1108,7 +1108,7 @@
               }
             }
           },
-          "401": { "description": "Basic Auth 认证失败" },
+          "401": { "description": "JWT 或写操作密码校验失败" },
           "403": {
             "description": "作用域越权",
             "content": {
@@ -2677,8 +2677,8 @@
             "description": "生效条件类型：date 单日 | range 日期范围 | weekly 每 N 周 | event 时刻事件 | cron 表达式"
           },
           "date": { "type": "string", "format": "date", "description": "kind=date：单日日期" },
-          "startDate": { "type": "string", "format": "date", "description": "kind=range/weekly：起始日期，weekly 同时作为周期锚点" },
-          "endDate": { "type": "string", "format": "date", "description": "结束日期（含当天），留空表示不设终点" },
+          "startDate": { "type": "string", "format": "date", "description": "kind=range/weekly：起始日期（range 必填），weekly 同时作为周期锚点" },
+          "endDate": { "type": "string", "format": "date", "description": "结束日期（含当天），留空表示不设终点（长期生效）" },
           "everyWeeks": { "type": "integer", "minimum": 1, "description": "kind=weekly：每 N 周" },
           "weekOffset": { "type": "integer", "minimum": 0, "description": "kind=weekly：周期内第几个槽位（0 起）" },
           "weekdays": {
@@ -2752,8 +2752,15 @@
           "when": { "$ref": "#/components/schemas/AutorunCondition" },
           "settings": {
             "type": "object",
-            "additionalProperties": { "type": "boolean" },
-            "description": "要覆盖的桌面端本地设置，支持 isWindowAlwaysOnTop / isDuringClassHidden / isAlwaysMinimized / isDuringClassCountdown"
+            "additionalProperties": false,
+            "minProperties": 1,
+            "description": "要覆盖的桌面端本地设置；未出现的键表示不覆盖（客户端保持用户本地设置）",
+            "properties": {
+              "isWindowAlwaysOnTop": { "type": "boolean", "description": "窗口置顶" },
+              "isDuringClassHidden": { "type": "boolean", "description": "上课隐藏" },
+              "isAlwaysMinimized": { "type": "boolean", "description": "始终缩小" },
+              "isDuringClassCountdown": { "type": "boolean", "description": "课上计时" }
+            }
           }
         }
       },

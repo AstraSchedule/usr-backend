@@ -168,13 +168,52 @@ func TestGetSchedule_DataContract(t *testing.T) {
 
 func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
 	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
-	assert.NotEqual(t, scheduleVersion(dataVersion, 1), scheduleVersion(dataVersion, 2))
-	assert.NotEqual(t, scheduleVersion(100, 2), scheduleVersion(101, 1))
+	assert.NotEqual(t, scheduleVersion(dataVersion, 1, ""), scheduleVersion(dataVersion, 2, ""))
+	assert.NotEqual(t, scheduleVersion(100, 2, ""), scheduleVersion(101, 1, ""))
+	// 动态条件的 5 分钟时间桶也要参与版本比较
+	assert.NotEqual(t, scheduleVersion(100, 2, "100"), scheduleVersion(100, 2, "101"))
 
-	parsedDataVersion, parsedWeekNumber, err := parseScheduleVersion(scheduleVersion(100, 2))
+	parsedDataVersion, parsedWeekNumber, parsedBucket, err := parseScheduleVersion(scheduleVersion(100, 2, ""))
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), parsedDataVersion)
 	assert.Equal(t, 2, parsedWeekNumber)
+	assert.Equal(t, "", parsedBucket)
+
+	_, _, parsedBucket, err = parseScheduleVersion(scheduleVersion(100, 2, "42"))
+	assert.NoError(t, err)
+	assert.Equal(t, "42", parsedBucket)
+
+	_, _, _, err = parseScheduleVersion("1:2:3:4")
+	assert.Error(t, err)
+}
+
+// 动态条件（单日 / 日期范围 / cron 等）会让课表在同一周内发生变化：
+// 这类任务存在时版本带时间桶，客户端据此在周内重新拉取，而不是一直吃 304。
+func TestGetSchedule_DynamicConditionInvalidatesCache(t *testing.T) {
+	ensureTestDB()
+
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{
+		School: "dyn", Grade: "2024", Class: "1",
+		Version: time.Now(),
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "dyn-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"dyn"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2000-01-01"},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	w := doClientRequest(t, router, "GET", "/dyn/2024/1")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在动态条件时版本应带时间桶")
 }
 
 func TestGetSchedule_NotModified(t *testing.T) {
@@ -534,7 +573,11 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
+	// 处理函数在请求开始时取 now，这里把请求前后的星期都视为合法：
+	// 避免断言时重新读时间在跨零点时抖动
+	before := time.Now().Weekday()
 	w := doClientRequest(t, router, "GET", "/autorun/2024/1")
+	after := time.Now().Weekday()
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
@@ -548,8 +591,14 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	dailyClass, ok := resp["daily_class"].([]interface{})
 	require.True(t, ok)
 	require.Len(t, dailyClass, 7)
-	today := dailyClass[int(time.Now().Weekday())].(map[string]interface{})
-	assert.Equal(t, "exam", today["timetable"], "范围内当天应使用 exam 作息")
+	appliedDays := make([]int, 0, 2)
+	for idx, day := range dailyClass {
+		if day.(map[string]interface{})["timetable"] == "exam" {
+			appliedDays = append(appliedDays, idx)
+		}
+	}
+	require.Len(t, appliedDays, 1, "应恰好替换一天的作息表")
+	assert.Contains(t, []int{int(before), int(after)}, appliedDays[0], "被替换的应当是请求当天")
 
 	// 客户端配置规则只下发本班作用域命中的条目
 	rules, ok := resp["client_config_rules"].([]interface{})
