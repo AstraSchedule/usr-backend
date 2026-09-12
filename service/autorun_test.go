@@ -210,7 +210,22 @@ func TestTaskStatus_EmptyEntries(t *testing.T) {
 	assert.Equal(t, 0, TaskStatus(record, day(2026, time.September, 1, 12)))
 }
 
-func TestTaskWindow_UnionKeepsUnboundedSide(t *testing.T) {
+func TestTaskStatus_PerEntryNotEnvelope(t *testing.T) {
+	// 两条单日条目之间的空档不能算「生效中」（用最早起点+最晚终点的包络区间会判错）
+	record := dbTable.AutorunRecord{
+		EType: dbTable.AutorunTypeTimetable,
+		Entries: []dbTable.AutorunEntry{
+			{ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"}, Action: map[string]interface{}{"timetableId": "exam"}},
+			{ID: "e2", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-10"}, Action: map[string]interface{}{"timetableId": "A"}},
+		},
+	}
+	assert.Equal(t, 1, TaskStatus(record, day(2026, time.September, 1, 12)), "第一条命中")
+	assert.Equal(t, 0, TaskStatus(record, day(2026, time.September, 5, 12)), "两条之间的空档仍有后续条目，应为待生效")
+	assert.Equal(t, 1, TaskStatus(record, day(2026, time.September, 10, 12)), "第二条命中")
+	assert.Equal(t, 2, TaskStatus(record, day(2026, time.September, 11, 12)), "全部结束才过期")
+}
+
+func TestTaskStatus_UnboundedEntryKeepsTaskActive(t *testing.T) {
 	// 一条单日条目 + 一条无终点的每周轮换条目：单日条目结束后任务整体仍应「生效中」
 	record := dbTable.AutorunRecord{
 		EType: dbTable.AutorunTypeTimetable,
@@ -220,7 +235,7 @@ func TestTaskWindow_UnionKeepsUnboundedSide(t *testing.T) {
 		},
 	}
 	assert.Equal(t, 1, TaskStatus(record, day(2026, time.September, 1, 12)))
-	assert.Equal(t, 1, TaskStatus(record, day(2026, time.October, 1, 12)), "无终点条目的并集不应被判为已过期")
+	assert.Equal(t, 1, TaskStatus(record, day(2026, time.October, 1, 12)), "无终点条目仍在生效")
 }
 
 func TestTaskStatus_DisabledEntriesIgnored(t *testing.T) {
@@ -240,33 +255,86 @@ func TestTaskStatus_DisabledEntriesIgnored(t *testing.T) {
 	assert.Equal(t, 2, TaskStatus(withEnabled, day(2026, time.September, 6, 12)))
 }
 
-func TestDynamicVersionBucket(t *testing.T) {
+func recordWithCondition(hashID string, etype int, scope []string, when *dbTable.AutorunCondition) dbTable.AutorunRecord {
+	return dbTable.AutorunRecord{
+		HashID: hashID, EType: etype, Scope: scope,
+		Entries: []dbTable.AutorunEntry{{ID: "e1", When: when, Action: map[string]interface{}{"timetableId": "A"}}},
+	}
+}
+
+func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
-	weekOnly := dbTable.AutorunRecord{
-		EType: dbTable.AutorunTypeTimetable, Scope: []string{"ALL"},
-		Entries: []dbTable.AutorunEntry{{ID: "e1", When: weeklyCondition(2, 0), Action: map[string]interface{}{"timetableId": "A"}}},
-	}
-	// 纯周次条件在周内不会变化，版本不需要时间桶（保持 304 缓存）
-	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
 
-	dated := dbTable.AutorunRecord{
-		EType: dbTable.AutorunTypeTimetable, Scope: []string{"s"},
-		Entries: []dbTable.AutorunEntry{{ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"}, Action: map[string]interface{}{"timetableId": "A"}}},
-	}
-	bucket := DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now)
-	assert.NotEqual(t, "", bucket)
-	// 同一个 5 分钟桶内保持稳定，跨桶变化
-	assert.Equal(t, bucket, DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now.Add(2*time.Minute)))
-	assert.NotEqual(t, bucket, DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "s", "g", "c", now.Add(6*time.Minute)))
+	// 纯周次条件只在周切换时变化，而周次已经写进版本串 → 不产生变化点
+	weekOnly := recordWithCondition("week", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
 
-	// 作用域不匹配 / 任务停用 / 客户端配置类型都不产生时间桶
-	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{dated}, "other", "g", "c", now))
+	// 已过期的单日条件不会再变化：不应该永久破坏 304 缓存
+	expired := recordWithCondition("expired", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-08-01"})
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{expired}, "s", "g", "c", now))
+
+	// 当天生效的单日条件：次日零点失效
+	today := recordWithCondition("today", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"})
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{today}, "s", "g", "c", now))
+
+	// 未来的单日条件：到生效日零点才变化
+	future := recordWithCondition("future", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-20"})
+	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{future}, "s", "g", "c", now))
+
+	// 有终点的范围条件：终点次日零点失效；无终点则不产生变化点
+	ranged := recordWithCondition("range", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-09-11"})
+	assert.Equal(t, day(2026, time.September, 12, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{ranged}, "s", "g", "c", now))
+
+	openEnded := recordWithCondition("open", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01"})
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{openEnded}, "s", "g", "c", now))
+
+	// cron：下一次命中的时刻
+	cronRecord := recordWithCondition("cron", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *"})
+	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{cronRecord}, "s", "g", "c", now))
+
+	// 限定星期的周次条件：次日零点变化
+	weekdayWeekly := recordWithCondition("weekday", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
+	weekdayWeekly.Entries[0].When.Weekdays = []int{1}
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekdayWeekly}, "s", "g", "c", now))
+}
+
+func TestVersionBoundary_MultipleRecordsTakesEarliest(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+	soon := recordWithCondition("soon", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"})
+	later := recordWithCondition("later", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-20"})
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{later, soon}, "s", "g", "c", now))
+}
+
+func TestVersionBoundary_IgnoresIrrelevantRecords(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+	dated := recordWithCondition("dated", dbTable.AutorunTypeTimetable, []string{"s"},
+		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"})
+
+	// 作用域不匹配
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{dated}, "other", "g", "c", now))
+
+	// 任务停用
 	disabled := dated
 	disabled.Disabled = true
-	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{disabled}, "s", "g", "c", now))
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{disabled}, "s", "g", "c", now))
+
+	// 客户端配置类型由客户端本地调度，不影响服务端课表版本
 	clientConfig := dated
 	clientConfig.EType = dbTable.AutorunTypeClientConfig
-	assert.Equal(t, "", DynamicVersionBucket([]dbTable.AutorunRecord{clientConfig}, "s", "g", "c", now))
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{clientConfig}, "s", "g", "c", now))
+
+	// 条目停用
+	disabledEntry := dated
+	disabledEntry.Entries = []dbTable.AutorunEntry{{ID: "e1", Disabled: true, When: dated.Entries[0].When, Action: dated.Entries[0].Action}}
+	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{disabledEntry}, "s", "g", "c", now))
 }
 
 func TestCollectClientConfigRules_FiltersByScopeAndType(t *testing.T) {

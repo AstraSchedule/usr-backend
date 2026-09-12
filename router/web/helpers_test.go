@@ -107,6 +107,67 @@ func TestMakeHashID_DifferentInputs(t *testing.T) {
 	assert.NotEqual(t, hash1, hash2)
 }
 
+func taskEntries(timetableID string) []dbTable.AutorunEntry {
+	return []dbTable.AutorunEntry{{
+		ID:     "e1",
+		When:   &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"},
+		Action: map[string]interface{}{"timetableId": timetableID},
+	}}
+}
+
+func TestMakeTaskHashID_StableForSameInput(t *testing.T) {
+	entries := taskEntries("exam")
+	hash1 := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s", "g"}, 3, "轮换作息", entries)
+	hash2 := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s", "g"}, 3, "轮换作息", entries)
+	assert.Equal(t, hash1, hash2)
+	assert.Len(t, hash1, 16)
+}
+
+func TestMakeTaskHashID_ScopeOrderIrrelevant(t *testing.T) {
+	entries := taskEntries("exam")
+	hash1 := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s", "g", "c"}, 1, "n", entries)
+	hash2 := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"c", "s", "g"}, 1, "n", entries)
+	assert.Equal(t, hash1, hash2, "作用域顺序不应改变任务 ID")
+}
+
+func TestMakeTaskHashID_DistinguishesFieldBoundaries(t *testing.T) {
+	// 手工拼接哈希时 "a=b|c=d" 与 "a=b|c=d" 这类跨字段的相同字节串会误判为同一条任务，
+	// 改用 JSON 编码后字段边界明确，以下两两都必须不同
+	first := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name",
+		[]dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"a": "x|b=y"}}})
+	second := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name",
+		[]dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"a": "x", "b": "y"}}})
+	assert.NotEqual(t, first, second)
+
+	// 分隔符出现在值里不应与其他字段混淆
+	third := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name",
+		[]dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"timetableId": "a~b"}}})
+	fourth := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name",
+		[]dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"timetableId": "a"}, Disabled: true}})
+	assert.NotEqual(t, third, fourth)
+
+	// 类型 / 优先级 / 名称 / 条目条件都要参与哈希
+	base := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name", taskEntries("exam"))
+	assert.NotEqual(t, base, makeTaskHashID(dbTable.AutorunTypeAll, []string{"s"}, 1, "name", taskEntries("exam")))
+	assert.NotEqual(t, base, makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 2, "name", taskEntries("exam")))
+	assert.NotEqual(t, base, makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "other", taskEntries("exam")))
+	assert.NotEqual(t, base, makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name", taskEntries("常日")))
+
+	weekCondition := taskEntries("exam")
+	weekCondition[0].When = &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenWeekly, EveryWeeks: 2, WeekOffset: 1}
+	assert.NotEqual(t, base, makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"s"}, 1, "name", weekCondition))
+}
+
+func TestMakeTaskHashID_PinnedRepresentativeTask(t *testing.T) {
+	// 钉住一个代表性任务的当前 ID：编码策略若被意外修改，这里会立刻失败
+	got := makeTaskHashID(dbTable.AutorunTypeTimetable, []string{"ALL"}, 5, "轮换作息",
+		[]dbTable.AutorunEntry{
+			{ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenWeekly, EveryWeeks: 2, WeekOffset: 0}, Action: map[string]interface{}{"timetableId": "exam"}},
+			{ID: "e2", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenWeekly, EveryWeeks: 2, WeekOffset: 1}, Action: map[string]interface{}{"timetableId": "常日"}},
+		})
+	assert.Equal(t, "021eaf4c67784700", got)
+}
+
 func TestStringsFromScope(t *testing.T) {
 	scope := []string{"school1", "grade1", "class1"}
 	result := stringsFromScope(scope)

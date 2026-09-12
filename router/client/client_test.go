@@ -168,39 +168,42 @@ func TestGetSchedule_DataContract(t *testing.T) {
 
 func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
 	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
-	assert.NotEqual(t, scheduleVersion(dataVersion, 1, ""), scheduleVersion(dataVersion, 2, ""))
-	assert.NotEqual(t, scheduleVersion(100, 2, ""), scheduleVersion(101, 1, ""))
-	// 动态条件的 5 分钟时间桶也要参与版本比较
-	assert.NotEqual(t, scheduleVersion(100, 2, "100"), scheduleVersion(100, 2, "101"))
+	assert.NotEqual(t, scheduleVersion(dataVersion, 1, 0), scheduleVersion(dataVersion, 2, 0))
+	assert.NotEqual(t, scheduleVersion(100, 2, 0), scheduleVersion(101, 1, 0))
+	// 变化点（下一次配置变更时刻）同样参与版本比较
+	assert.NotEqual(t, scheduleVersion(100, 2, 1000), scheduleVersion(100, 2, 2000))
 
-	parsedDataVersion, parsedWeekNumber, parsedBucket, err := parseScheduleVersion(scheduleVersion(100, 2, ""))
+	parsedDataVersion, parsedWeekNumber, parsedBoundary, err := parseScheduleVersion(scheduleVersion(100, 2, 0))
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), parsedDataVersion)
 	assert.Equal(t, 2, parsedWeekNumber)
-	assert.Equal(t, "", parsedBucket)
+	assert.Equal(t, int64(0), parsedBoundary)
 
-	_, _, parsedBucket, err = parseScheduleVersion(scheduleVersion(100, 2, "42"))
+	_, _, parsedBoundary, err = parseScheduleVersion(scheduleVersion(100, 2, 42))
 	assert.NoError(t, err)
-	assert.Equal(t, "42", parsedBucket)
+	assert.Equal(t, int64(42), parsedBoundary)
 
 	_, _, _, err = parseScheduleVersion("1:2:3:4")
 	assert.Error(t, err)
+	_, _, _, err = parseScheduleVersion("1:2:not-a-number")
+	assert.Error(t, err)
 }
 
-// 动态条件（单日 / 日期范围 / cron 等）会让课表在同一周内发生变化：
-// 这类任务存在时版本带时间桶，客户端据此在周内重新拉取，而不是一直吃 304。
-func TestGetSchedule_DynamicConditionInvalidatesCache(t *testing.T) {
+// 有后续变化点的自动任务（这里用「明天生效的单日调休」）会把变化点写进版本，
+// 客户端越过该时刻后版本必然不同，从而在周内拿到新配置而不是一直吃 304。
+func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
 	ensureTestDB()
 
+	now := time.Now()
 	database := db.GetDB()
 	database.Save(&dbTable.DataVersion{
 		School: "dyn", Grade: "2024", Class: "1",
-		Version: time.Now(),
+		Version: now,
 	})
 	database.Save(&dbTable.AutorunRecord{
 		HashID: "dyn-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"dyn"}, Level: 1,
 		Entries: []dbTable.AutorunEntry{{
-			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2000-01-01"},
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: now.AddDate(0, 0, 1).Format("2006-01-02")},
 			Action: map[string]interface{}{"timetableId": "exam"},
 		}},
 	})
@@ -213,7 +216,40 @@ func TestGetSchedule_DynamicConditionInvalidatesCache(t *testing.T) {
 	var resp map[string]interface{}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	version, _ := resp["version"].(string)
-	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在动态条件时版本应带时间桶")
+	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在后续变化点时版本应带变化点")
+}
+
+// 已过期的单日规则不会再改变课表：版本里不应出现变化点，否则历史任务会永久破坏 304 缓存
+func TestGetSchedule_ExpiredRuleKeepsCache(t *testing.T) {
+	ensureTestDB()
+
+	now := time.Now()
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{
+		School: "cached", Grade: "2024", Class: "1",
+		Version: now,
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "expired-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"cached"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: now.AddDate(0, 0, -30).Format("2006-01-02")},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	w := doClientRequest(t, router, "GET", "/cached/2024/1")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	assert.Regexp(t, `^\d+:\d+$`, version, "过期规则不应产生变化点")
+
+	// 再请求一次仍然命中 304
+	w2 := doClientRequest(t, router, "GET", "/cached/2024/1?version="+version)
+	assert.Equal(t, http.StatusNotModified, w2.Code)
 }
 
 func TestGetSchedule_NotModified(t *testing.T) {

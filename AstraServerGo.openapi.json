@@ -2417,7 +2417,10 @@
             "required": ["supportWebSocket", "version"],
             "properties": {
               "supportWebSocket": { "type": "boolean" },
-              "version": { "type": "string", "description": "Unix 时间戳秒" },
+              "version": {
+                "type": "string",
+                "description": "缓存版本，格式为 dataVersion:weekNumber[:boundary]。boundary 是该班课表下一次可能变化的时刻（Unix 秒），仅在存在后续变化点时出现；客户端回传同格式的 version 即可命中 304"
+              },
               "countdown_records": {
                 "type": "array",
                 "items": { "$ref": "#/components/schemas/CountdownRecordView" },

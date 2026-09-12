@@ -2,7 +2,6 @@ package service
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -227,25 +226,12 @@ func CollectClientConfigRules(records []dbTable.AutorunRecord, school, grade, cl
 	return out
 }
 
-// IsTimeDynamicCondition 判断条件是否可能在「同一周内」改变命中结果。
-// 只用于课表缓存版本：周次切换已由 weekNumber 覆盖，其余条件需要在周内重新拉取。
-func IsTimeDynamicCondition(when *dbTable.AutorunCondition) bool {
-	if when == nil {
-		return false
-	}
-	switch when.Kind {
-	case dbTable.AutorunWhenDate, dbTable.AutorunWhenRange, dbTable.AutorunWhenCron, dbTable.AutorunWhenEvent:
-		return true
-	case dbTable.AutorunWhenWeekly:
-		return len(when.Weekdays) > 0
-	default:
-		return false
-	}
-}
-
-// DynamicVersionBucket 返回课表缓存版本的时间桶：当该班级存在可能在周内改变命中结果的任务时，
-// 返回按 dynamicBucketSeconds 切分的时间桶（客户端据此在周内重新拉取），否则返回空串以保持 304 缓存有效。
-func DynamicVersionBucket(records []dbTable.AutorunRecord, school, grade, classNumber string, now time.Time) string {
+// VersionBoundary 返回该班课表配置「下一次可能变化」的时刻（Unix 秒），0 表示不存在后续变化点。
+// 客户端只需比较版本串：变化点之前一直命中 304；越过变化点后版本必然不同，下一次请求即拿到新配置。
+// 已过期或长期不变的条目不会再产生变化点，因此不会无谓地破坏缓存。
+func VersionBoundary(records []dbTable.AutorunRecord, school, grade, classNumber string, now time.Time) int64 {
+	ctx := RuleContext{Now: now}
+	boundary := int64(0)
 	for _, r := range records {
 		if r.Disabled || r.EType == dbTable.AutorunTypeClientConfig {
 			continue
@@ -254,16 +240,76 @@ func DynamicVersionBucket(records []dbTable.AutorunRecord, school, grade, classN
 			continue
 		}
 		for _, entry := range EnabledEntriesOf(r) {
-			if IsTimeDynamicCondition(entry.When) {
-				return strconv.FormatInt(now.Unix()/dynamicBucketSeconds, 10)
+			next := entryNextBoundary(entry, ctx)
+			if next == 0 {
+				continue
+			}
+			if boundary == 0 || next < boundary {
+				boundary = next
 			}
 		}
 	}
-	return ""
+	return boundary
 }
 
-// dynamicBucketSeconds 动态条件的刷新粒度（5 分钟）
-const dynamicBucketSeconds = 300
+// entryNextBoundary 计算条目下一次改变命中结果的时刻；0 表示不会再变化
+func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
+	when := e.When
+	if when == nil {
+		return 0
+	}
+	location := ctx.Now.Location()
+	switch when.Kind {
+	case dbTable.AutorunWhenDate:
+		day, ok := parseConditionDate(when.Date, location)
+		if !ok {
+			return 0
+		}
+		if ctx.Now.Before(day) {
+			return day.Unix()
+		}
+		end := day.AddDate(0, 0, 1)
+		if ctx.Now.Before(end) {
+			return end.Unix()
+		}
+		return 0
+	case dbTable.AutorunWhenRange:
+		if start, ok := parseConditionDate(when.StartDate, location); ok && ctx.Now.Before(start) {
+			return start.Unix()
+		}
+		// 有终点的范围：终点次日的零点失效；无终点则不会再变化
+		if end, ok := parseConditionDate(when.EndDate, location); ok {
+			endExclusive := end.AddDate(0, 0, 1)
+			if ctx.Now.Before(endExclusive) {
+				return endExclusive.Unix()
+			}
+		}
+		return 0
+	case dbTable.AutorunWhenCron:
+		spec, ok := ParseCron(when.Cron)
+		if !ok {
+			return 0
+		}
+		if next, ok := spec.Next(ctx.Now); ok {
+			return next.Unix()
+		}
+		return 0
+	case dbTable.AutorunWhenWeekly:
+		// 纯周次条件只在周切换时变化，而周次本身已经写进版本串；限定星期时每天零点变化一次
+		if len(when.Weekdays) == 0 {
+			return 0
+		}
+		if end, ok := parseConditionDate(when.EndDate, location); ok && !ctx.Now.Before(end.AddDate(0, 0, 1)) {
+			return 0
+		}
+		if start, ok := parseConditionDate(when.StartDate, location); ok && ctx.Now.Before(start) {
+			return start.Unix()
+		}
+		return dateOnly(ctx.Now).AddDate(0, 0, 1).Unix()
+	default:
+		return 0
+	}
+}
 
 // EntryWindow 返回条目在时间轴上的生效区间（用于任务状态推导）。
 // start/end 为半开区间；hasStart/hasEnd 为 false 表示该侧不设界（长期生效）。
@@ -304,45 +350,28 @@ func EnabledEntriesOf(r dbTable.AutorunRecord) []dbTable.AutorunEntry {
 	return out
 }
 
-// TaskWindow 汇总任务内启用条目的生效区间（并集）。
-// 并集语义：只要有一条启用条目在该侧无界，整段区间在该侧就是无界的。
-func TaskWindow(r dbTable.AutorunRecord, ctx RuleContext) (start, end time.Time, hasStart, hasEnd bool) {
+// TaskStatus 逐个启用条目判定状态：0 待生效 / 1 生效中 / 2 已过期。
+// 不能用「最早起点 + 最晚终点」的包络区间代替：9/1 与 9/10 两条单日条目之间的 9/5 并不生效。
+func TaskStatus(r dbTable.AutorunRecord, today time.Time) int {
 	entries := EnabledEntriesOf(r)
 	if len(entries) == 0 {
-		return time.Time{}, time.Time{}, false, false
+		return 0
 	}
-	startSet, endSet := false, false
-	openStart, openEnd := false, false
+	ctx := RuleContext{Now: today}
+	hasUpcoming := false
 	for _, e := range entries {
-		s, en, hs, he := EntryWindow(e, ctx)
-		switch {
-		case !hs:
-			openStart = true
-		case !startSet || s.Before(start):
-			start, startSet = s, true
+		start, end, hasStart, hasEnd := EntryWindow(e, ctx)
+		started := !hasStart || !today.Before(start)
+		ended := hasEnd && !today.Before(end)
+		if started && !ended {
+			return 1
 		}
-		switch {
-		case !he:
-			openEnd = true
-		case !endSet || en.After(end):
-			end, endSet = en, true
+		if !ended {
+			hasUpcoming = true
 		}
 	}
-	return start, end, startSet && !openStart, endSet && !openEnd
-}
-
-// TaskStatus 按任务整体生效区间推导状态：0 待生效 / 1 生效中 / 2 已过期
-func TaskStatus(r dbTable.AutorunRecord, today time.Time) int {
-	if len(EnabledEntriesOf(r)) == 0 {
+	if hasUpcoming {
 		return 0
 	}
-	day := dateOnly(today)
-	start, end, hasStart, hasEnd := TaskWindow(r, RuleContext{Now: today})
-	if hasStart && day.Before(start) {
-		return 0
-	}
-	if hasEnd && !day.Before(end) {
-		return 2
-	}
-	return 1
+	return 2
 }

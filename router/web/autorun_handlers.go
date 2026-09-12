@@ -148,7 +148,13 @@ func validateWeeklyCondition(when *dbTable.AutorunCondition) string {
 	if detail := validateOptionalDate(when.StartDate, "startDate"); detail != "" {
 		return detail
 	}
-	return validateOptionalDate(when.EndDate, "endDate")
+	if detail := validateOptionalDate(when.EndDate, "endDate"); detail != "" {
+		return detail
+	}
+	if when.StartDate != "" && when.EndDate != "" && when.StartDate > when.EndDate {
+		return "when.startDate 不能晚于 when.endDate"
+	}
+	return ""
 }
 
 // validateEventCondition 时刻事件只由桌面端本地求值：课表类任务在服务端解析，

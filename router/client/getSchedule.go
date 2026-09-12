@@ -20,10 +20,10 @@ func GetSchedule(c *gin.Context) {
 	version := c.Query("version") // 可能没有
 	clientDataVersion := int64(0)
 	clientWeekNumber := 0
-	clientDynamicBucket := ""
+	clientBoundary := int64(0)
 	if version != "" {
 		var err error
-		clientDataVersion, clientWeekNumber, clientDynamicBucket, err = parseScheduleVersion(version)
+		clientDataVersion, clientWeekNumber, clientBoundary, err = parseScheduleVersion(version)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{ // 400
 				"error": err.Error(),
@@ -35,13 +35,18 @@ func GetSchedule(c *gin.Context) {
 	serverDataVersion := db.GetLatestVersion(school, grade, class)
 	schedule := db.GetSchedule(school, grade, class)
 	timetable := db.GetTimetable(school, grade)
-	records, _ := db.FetchAutorunRecords("")
+	// 自动任务查询失败时宁可返回 500：否则会静默丢掉全部规则，把错误的课表当成正确结果下发
+	records, err := db.FetchAutorunRecords("")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
-	// 单日/日期范围/cron 等条件可能在同一周内改变命中结果，这类任务存在时用 5 分钟时间桶
-	// 迫使客户端在周内重新拉取；没有这类任务时桶为空，304 缓存照常生效
-	dynamicBucket := service.DynamicVersionBucket(records, school, grade, class, now)
-	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber, dynamicBucket)
-	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber && clientDynamicBucket == dynamicBucket {
+	// 单日/日期范围/cron 等条件可能在周内改变命中结果：把「下一次变化时刻」写进版本串，
+	// 变化之前 304 缓存照常生效，越过变化点后版本必然不同，客户端下一次请求即拿到新配置
+	boundary := service.VersionBoundary(records, school, grade, class, now)
+	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber, boundary)
+	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber && clientBoundary == boundary {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
@@ -143,43 +148,46 @@ func GetSchedule(c *gin.Context) {
 	c.JSON(http.StatusOK, fullResponseMap)
 }
 
-// scheduleVersion 生成客户端缓存版本：dataVersion:weekNumber[:dynamicBucket]
-// dynamicBucket 只在存在「周内可能改变」的自动任务时出现，用于让客户端在周内重新拉取。
-func scheduleVersion(dataVersion int64, weekNumber int, dynamicBucket string) string {
+// scheduleVersion 生成客户端缓存版本：dataVersion:weekNumber[:boundary]
+// boundary 是「该班课表下一次可能变化」的时刻；不存在后续变化点时省略该段，304 缓存长期有效。
+func scheduleVersion(dataVersion int64, weekNumber int, boundary int64) string {
 	if weekNumber < 1 {
 		weekNumber = 1
 	}
 	version := strconv.FormatInt(dataVersion, 10) + ":" + strconv.Itoa(weekNumber)
-	if dynamicBucket != "" {
-		version += ":" + dynamicBucket
+	if boundary > 0 {
+		version += ":" + strconv.FormatInt(boundary, 10)
 	}
 	return version
 }
 
-func parseScheduleVersion(version string) (int64, int, string, error) {
+func parseScheduleVersion(version string) (int64, int, int64, error) {
 	parts := strings.Split(version, ":")
 	if len(parts) == 1 {
 		// 兼容旧客户端发送的纯数据版本；week=0 保证不会误命中新的复合版本。
 		dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
-		return dataVersion, 0, "", err
+		return dataVersion, 0, 0, err
 	}
 	if len(parts) > 3 {
-		return 0, 0, "", strconv.ErrSyntax
+		return 0, 0, 0, strconv.ErrSyntax
 	}
 	dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, 0, "", err
+		return 0, 0, 0, err
 	}
 	weekNumber, err := strconv.Atoi(parts[1])
 	if err != nil || weekNumber < 1 {
 		if err == nil {
 			err = strconv.ErrSyntax
 		}
-		return 0, 0, "", err
+		return 0, 0, 0, err
 	}
-	dynamicBucket := ""
+	boundary := int64(0)
 	if len(parts) == 3 {
-		dynamicBucket = parts[2]
+		boundary, err = strconv.ParseInt(parts[2], 10, 64)
+		if err != nil || boundary < 0 {
+			return 0, 0, 0, strconv.ErrSyntax
+		}
 	}
-	return dataVersion, weekNumber, dynamicBucket, nil
+	return dataVersion, weekNumber, boundary, nil
 }

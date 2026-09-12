@@ -148,6 +148,7 @@ func TestPutAutorunTask_InvalidPayloads(t *testing.T) {
 		{"周期偏移越界", whenBody(map[string]interface{}{"kind": "weekly", "everyWeeks": 2, "weekOffset": 2})},
 		{"周期起始日非法", whenBody(map[string]interface{}{"kind": "weekly", "everyWeeks": 2, "startDate": "x"})},
 		{"周期结束日非法", whenBody(map[string]interface{}{"kind": "weekly", "everyWeeks": 2, "endDate": "x"})},
+		{"周期起止倒置", whenBody(map[string]interface{}{"kind": "weekly", "everyWeeks": 2, "startDate": "2026-09-10", "endDate": "2026-09-01"})},
 		{"cron 非法", whenBody(map[string]interface{}{"kind": "cron", "cron": "bad"})},
 		{"cron 负数时长", whenBody(map[string]interface{}{"kind": "cron", "cron": "0 8 * * *", "duration": -1})},
 		{"时刻事件不支持课表类任务", whenBody(map[string]interface{}{"kind": "event", "event": "class_start", "period": 1})},
