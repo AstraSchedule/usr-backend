@@ -57,15 +57,17 @@ func GetSchedule(c *gin.Context) {
 	}
 	subject := db.GetSubject(school, grade)
 	records, _ := db.FetchAutorunRecords("")
-	resolvedDailyClasses := service.ApplyScheduleRules(
+	resolvedDailyClasses := service.ApplyScheduleRulesCtx(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
 		records,
 		school,
 		grade,
 		class,
-		now,
+		service.RuleContext{Now: now, TermStart: timetable.TimetableConfig.Start},
 	)
+	// 客户端配置规则：服务端按生效域过滤，时间条件由桌面端本地调度求值
+	clientConfigRules := service.CollectClientConfigRules(records, school, grade, class)
 
 	// 根据当前周数解析多周轮换课程，生成扁平的 classList
 	type dailyClassFlat struct {
@@ -129,6 +131,10 @@ func GetSchedule(c *gin.Context) {
 		"divider":                dividerMap,
 		"subject_name":           subjectNameMap,
 		"countdown_records":      fullResponse.CountdownRecords,
+		// 桌面端本地调度客户端配置规则所需的时间基准与规则集
+		"week_number":         weekNumber,
+		"term_start":          timetable.TimetableConfig.Start,
+		"client_config_rules": clientConfigRules,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
 }

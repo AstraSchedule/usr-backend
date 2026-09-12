@@ -490,3 +490,75 @@ func TestBroadcastSync_DeliversToConnectedClient(t *testing.T) {
 	assert.Equal(t, "SyncConfig", string(msg))
 	assert.Equal(t, 0, BroadcastSync("other", "school"))
 }
+
+// 自动任务 v2：客户端配置规则随课表响应下发，范围条件按日期命中
+func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
+	ensureTestDB()
+
+	database := db.GetDB()
+	// 使用独立 scope，避免与其它测试共享数据
+	database.Save(&dbTable.Schedule{
+		School: "autorun", Grade: "2024", Class: "1",
+		DailyClasses: [7]dbTable.DailyClass{
+			{Timetable: "常日", ClassList: dbTable.ClassList{{"数"}}},
+		},
+	})
+	database.Save(&dbTable.Timetable{
+		School: "autorun", Grade: "2024",
+		TimetableConfig: dbTable.TimetableConfig{
+			Timetable: map[string]map[string]interface{}{"常日": {"08:00-08:40": 0}, "exam": {"09:00-09:40": 0}},
+			Divider:   map[string][]int{"常日": {}},
+			Start:     "2020-09-01",
+		},
+	})
+	// 覆盖极宽的日期范围：断言不受当前日期影响
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "range-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"autorun"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2000-01-01", EndDate: "2099-12-31"},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "cfg-rule", EType: dbTable.AutorunTypeClientConfig, Scope: []string{"autorun/2024/1"}, Level: 5,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenEvent, Event: dbTable.AutorunEventClassStart, Period: 1},
+			Action: map[string]interface{}{"settings": map[string]interface{}{"isWindowAlwaysOnTop": true}},
+		}},
+	})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "cfg-other-class", EType: dbTable.AutorunTypeClientConfig, Scope: []string{"autorun/2024/2"}, Level: 5,
+		Entries: []dbTable.AutorunEntry{{ID: "e1", Action: map[string]interface{}{"settings": map[string]interface{}{"isAlwaysMinimized": true}}}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	w := doClientRequest(t, router, "GET", "/autorun/2024/1")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// 新增的调度基准字段
+	assert.Contains(t, resp, "week_number")
+	assert.Equal(t, "2020-09-01", resp["term_start"])
+
+	// 日期范围条件命中：作息表替换只作用于「今天」对应的星期（与 v1 行为一致）
+	dailyClass, ok := resp["daily_class"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, dailyClass, 7)
+	today := dailyClass[int(time.Now().Weekday())].(map[string]interface{})
+	assert.Equal(t, "exam", today["timetable"], "范围内当天应使用 exam 作息")
+
+	// 客户端配置规则只下发本班作用域命中的条目
+	rules, ok := resp["client_config_rules"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, rules, 1)
+	rule := rules[0].(map[string]interface{})
+	assert.Equal(t, "cfg-rule", rule["taskId"])
+	assert.Equal(t, float64(5), rule["priority"])
+	settings, ok := rule["settings"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, settings["isWindowAlwaysOnTop"])
+}

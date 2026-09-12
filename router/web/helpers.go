@@ -47,6 +47,34 @@ func makeHashID(etype int, scope []string, level int, parameters map[string]inte
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// makeTaskHashID 生成 v2 任务的稳定哈希 ID（类型 + 优先级 + 作用域 + 名称 + 条目内容）。
+// v1 的 makeHashID 保持不变，旧规则的 ID 不会漂移。
+func makeTaskHashID(etype int, scope []string, level int, name string, entries []dbTable.AutorunEntry) string {
+	sum := sha256.Sum256([]byte(strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + name + "|" + stableEntriesString(entries)))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func stableEntriesString(entries []dbTable.AutorunEntry) string {
+	out := ""
+	for _, entry := range entries {
+		out += entry.ID + "~" + strconv.FormatBool(entry.Disabled) + "~" + stableConditionString(entry.When) + "~" + stableMapString(entry.Action) + ";"
+	}
+	return out
+}
+
+func stableConditionString(when *dbTable.AutorunCondition) string {
+	if when == nil {
+		return ""
+	}
+	days := make([]string, 0, len(when.Weekdays))
+	for _, d := range when.Weekdays {
+		days = append(days, strconv.Itoa(d))
+	}
+	return when.Kind + "|" + when.Date + "|" + when.StartDate + "|" + when.EndDate + "|" +
+		strconv.Itoa(when.EveryWeeks) + "|" + strconv.Itoa(when.WeekOffset) + "|" + strings.Join(days, ",") + "|" +
+		when.Event + "|" + strconv.Itoa(when.Period) + "|" + when.Cron + "|" + strconv.Itoa(when.Duration)
+}
+
 func stringsFromScope(scope []string) string {
 	copyScope := append([]string(nil), scope...)
 	sort.Strings(copyScope)

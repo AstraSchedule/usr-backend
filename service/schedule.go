@@ -44,6 +44,20 @@ func scopeSpecificity(scopeEntry, school, grade, classNumber string) int {
 	return len(parts)
 }
 
+// bestRowSpecificityAndScope 返回最具体的作用域条目及其具体度（-1 表示全部不匹配）
+func bestRowSpecificityAndScope(scope []string, school, grade, classNumber string) (int, string) {
+	best := -1
+	bestScope := ""
+	for _, s := range scope {
+		spec := scopeSpecificity(s, school, grade, classNumber)
+		if spec > best {
+			best = spec
+			bestScope = s
+		}
+	}
+	return best, bestScope
+}
+
 func bestRowSpecificity(scope []string, school, grade, classNumber string) int {
 	best := -1
 	for _, s := range scope {
@@ -65,44 +79,35 @@ func getRule(params map[string]interface{}) map[string]interface{} {
 	return params
 }
 
-func parseRuleDate(rule map[string]interface{}) (time.Time, bool) {
-	dateStr, _ := rule["date"].(string)
-	if dateStr == "" {
-		return time.Time{}, false
-	}
-	d, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return d, true
-}
-
 func sameDate(a, b time.Time) bool {
 	return a.Year() == b.Year() && a.Month() == b.Month() && a.Day() == b.Day()
 }
 
-func collectCandidates(records []dbTable.AutorunRecord, etype int, school, grade, classNumber string, targetDate time.Time) []scheduleRuleCandidate {
+// collectCandidates 收集指定类型下所有命中的条目。
+// 一条任务可以带多条条目，命中判定统一走 service 的条件引擎（MatchEntry）。
+func collectCandidates(records []dbTable.AutorunRecord, etype int, school, grade, classNumber string, ctx RuleContext) []scheduleRuleCandidate {
 	out := make([]scheduleRuleCandidate, 0)
 	for _, r := range records {
-		if r.EType != etype {
-			continue
-		}
-		rule := getRule(r.Parameters)
-		ruleDate, ok := parseRuleDate(rule)
-		if !ok || !sameDate(ruleDate, targetDate) {
+		if r.EType != etype || r.Disabled {
 			continue
 		}
 		spec := bestRowSpecificity(r.Scope, school, grade, classNumber)
 		if spec < 0 {
 			continue
 		}
-		out = append(out, scheduleRuleCandidate{
-			Level: r.Level,
-			Spec:  spec,
-			Rule:  rule,
-		})
+		for _, entry := range EntriesOf(r) {
+			if !MatchEntry(entry, ctx) {
+				continue
+			}
+			out = append(out, scheduleRuleCandidate{
+				Level: r.Level,
+				Spec:  spec,
+				Rule:  entry.Action,
+			})
+		}
 	}
-	sort.Slice(out, func(i, j int) bool {
+	// 稳定排序：同优先级同作用域时保持录入顺序（同一任务内多条条目先后生效）
+	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Level == out[j].Level {
 			return out[i].Spec < out[j].Spec
 		}
@@ -168,11 +173,18 @@ func applyPeriodsToDay(schedule *[7]dbTable.DailyClass, todayIdx int, rule map[s
 	schedule[todayIdx].ClassList = classList
 }
 
+// ApplyScheduleRules 兼容入口：只按日期匹配（无学期起始日，周期条件按第 1 周语义求值）。
+// 新调用方请使用 ApplyScheduleRulesCtx 以便传入学期起始日等上下文。
 func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, targetDate time.Time) [7]dbTable.DailyClass {
-	resolved := base
-	todayIdx := weekdayIndex(targetDate)
+	return ApplyScheduleRulesCtx(base, timetable, records, school, grade, classNumber, RuleContext{Now: targetDate})
+}
 
-	for _, c := range collectCandidates(records, 0, school, grade, classNumber, targetDate) {
+// ApplyScheduleRulesCtx 按 COMPENSATION → TIMETABLE → SCHEDULE → ALL 的顺序叠加自动任务条目
+func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
+	resolved := base
+	todayIdx := weekdayIndex(ctx.Now)
+
+	for _, c := range collectCandidates(records, 0, school, grade, classNumber, ctx) {
 		useDateStr, _ := c.Rule["useDate"].(string)
 		useDate, err := time.Parse("2006-01-02", useDateStr)
 		if err != nil {
@@ -183,7 +195,7 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 		resolved[todayIdx].Timetable = resolved[srcIdx].Timetable
 	}
 
-	for _, c := range collectCandidates(records, 1, school, grade, classNumber, targetDate) {
+	for _, c := range collectCandidates(records, 1, school, grade, classNumber, ctx) {
 		timetableID, _ := c.Rule["timetableId"].(string)
 		if timetableID == "" {
 			continue
@@ -191,11 +203,11 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 		resolved[todayIdx].Timetable = timetableID
 	}
 
-	for _, c := range collectCandidates(records, 2, school, grade, classNumber, targetDate) {
+	for _, c := range collectCandidates(records, 2, school, grade, classNumber, ctx) {
 		applyPeriodsToDay(&resolved, todayIdx, c.Rule)
 	}
 
-	for _, c := range collectCandidates(records, 3, school, grade, classNumber, targetDate) {
+	for _, c := range collectCandidates(records, 3, school, grade, classNumber, ctx) {
 		timetableID, _ := c.Rule["timetableId"].(string)
 		if timetableID != "" {
 			resolved[todayIdx].Timetable = timetableID
