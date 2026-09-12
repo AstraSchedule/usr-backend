@@ -16,6 +16,8 @@ import (
 const (
 	invalidArgPrefix = "无效参数: "
 	dateLayout       = "2006-01-02"
+	// msgTimetableRequired 作息表 ID 缺失时的统一提示（TIMETABLE / ALL 与旧接口共用）
+	msgTimetableRequired = "timetableId 必须为非空字符串"
 )
 
 // clientConfigSettingKeys 自动任务可以覆盖的桌面端本地配置项（白名单）
@@ -89,13 +91,13 @@ func validateEntryAction(etype int, action map[string]interface{}) string {
 		}
 	case dbTable.AutorunTypeTimetable:
 		if id, _ := action["timetableId"].(string); id == "" {
-			return "timetableId 必须为非空字符串"
+			return msgTimetableRequired
 		}
 	case dbTable.AutorunTypeSchedule:
 		return validateScheduleAction(action)
 	case dbTable.AutorunTypeAll:
 		if id, _ := action["timetableId"].(string); id == "" {
-			return "timetableId 必须为非空字符串"
+			return msgTimetableRequired
 		}
 		return validateScheduleAction(action)
 	case dbTable.AutorunTypeClientConfig:
@@ -106,73 +108,104 @@ func validateEntryAction(etype int, action map[string]interface{}) string {
 	return ""
 }
 
+func validateConditionWeekdays(days []int) string {
+	for _, day := range days {
+		if day < 0 || day > 6 {
+			return "when.weekdays 取值必须为 0-6"
+		}
+	}
+	return ""
+}
+
+func validateOptionalDate(value, fieldName string) string {
+	if value == "" || isValidDate(value) {
+		return ""
+	}
+	return "when." + fieldName + " 格式错误"
+}
+
+func validateRangeCondition(when *dbTable.AutorunCondition) string {
+	if !isValidDate(when.StartDate) {
+		return "when.startDate 格式错误"
+	}
+	// endDate 可省略：表示从 startDate 起长期生效
+	if detail := validateOptionalDate(when.EndDate, "endDate"); detail != "" {
+		return detail
+	}
+	if when.EndDate != "" && when.StartDate > when.EndDate {
+		return "when.startDate 不能晚于 when.endDate"
+	}
+	return ""
+}
+
+func validateWeeklyCondition(when *dbTable.AutorunCondition) string {
+	if when.EveryWeeks <= 0 {
+		return "when.everyWeeks 必须为正整数"
+	}
+	if when.WeekOffset < 0 || when.WeekOffset >= when.EveryWeeks {
+		return "when.weekOffset 必须落在 0 到 everyWeeks-1 之间"
+	}
+	if detail := validateOptionalDate(when.StartDate, "startDate"); detail != "" {
+		return detail
+	}
+	return validateOptionalDate(when.EndDate, "endDate")
+}
+
+// validateEventCondition 时刻事件只由桌面端本地求值：课表类任务在服务端解析，
+// 无法判定节次时刻，直接拒绝以免被误解为「全天生效」
+func validateEventCondition(when *dbTable.AutorunCondition, etype int) string {
+	if etype != dbTable.AutorunTypeClientConfig {
+		return "when.kind=event 仅支持客户端配置类型"
+	}
+	switch when.Event {
+	case dbTable.AutorunEventClassStart, dbTable.AutorunEventClassEnd:
+		if when.Period <= 0 {
+			return "when.period 必须为正整数"
+		}
+		return ""
+	case dbTable.AutorunEventStartup:
+		return ""
+	default:
+		return "when.event 不受支持"
+	}
+}
+
+func validateCronCondition(when *dbTable.AutorunCondition) string {
+	if !service.IsValidCron(when.Cron) {
+		return "when.cron 不是合法的 5 字段表达式"
+	}
+	if when.Duration < 0 {
+		return "when.duration 不能为负数"
+	}
+	return ""
+}
+
 // validateEntryCondition 校验生效条件，返回错误详情（空串表示通过）。
 // etype 用于限制只在客户端求值的条件（时刻事件）不被课表类任务使用。
 func validateEntryCondition(when *dbTable.AutorunCondition, etype int) string {
 	if when == nil {
 		return ""
 	}
-	for _, day := range when.Weekdays {
-		if day < 0 || day > 6 {
-			return "when.weekdays 取值必须为 0-6"
-		}
+	if detail := validateConditionWeekdays(when.Weekdays); detail != "" {
+		return detail
 	}
 	switch when.Kind {
 	case dbTable.AutorunWhenDate:
 		if !isValidDate(when.Date) {
 			return "when.date 格式错误"
 		}
+		return ""
 	case dbTable.AutorunWhenRange:
-		if !isValidDate(when.StartDate) {
-			return "when.startDate 格式错误"
-		}
-		// endDate 可省略：表示从 startDate 起长期生效
-		if when.EndDate != "" {
-			if !isValidDate(when.EndDate) {
-				return "when.endDate 格式错误"
-			}
-			if when.StartDate > when.EndDate {
-				return "when.startDate 不能晚于 when.endDate"
-			}
-		}
+		return validateRangeCondition(when)
 	case dbTable.AutorunWhenWeekly:
-		if when.EveryWeeks <= 0 {
-			return "when.everyWeeks 必须为正整数"
-		}
-		if when.WeekOffset < 0 || when.WeekOffset >= when.EveryWeeks {
-			return "when.weekOffset 必须落在 0 到 everyWeeks-1 之间"
-		}
-		if when.StartDate != "" && !isValidDate(when.StartDate) {
-			return "when.startDate 格式错误"
-		}
-		if when.EndDate != "" && !isValidDate(when.EndDate) {
-			return "when.endDate 格式错误"
-		}
+		return validateWeeklyCondition(when)
 	case dbTable.AutorunWhenEvent:
-		// 时刻事件只由桌面端本地求值：课表类任务在服务端解析，无法判定节次时刻，直接拒绝以免误解为「全天生效」
-		if etype != dbTable.AutorunTypeClientConfig {
-			return "when.kind=event 仅支持客户端配置类型"
-		}
-		if when.Event == dbTable.AutorunEventClassStart || when.Event == dbTable.AutorunEventClassEnd {
-			if when.Period <= 0 {
-				return "when.period 必须为正整数"
-			}
-			return ""
-		}
-		if when.Event != dbTable.AutorunEventStartup {
-			return "when.event 不受支持"
-		}
+		return validateEventCondition(when, etype)
 	case dbTable.AutorunWhenCron:
-		if !service.IsValidCron(when.Cron) {
-			return "when.cron 不是合法的 5 字段表达式"
-		}
-		if when.Duration < 0 {
-			return "when.duration 不能为负数"
-		}
+		return validateCronCondition(when)
 	default:
 		return "when.kind 不受支持"
 	}
-	return ""
 }
 
 // checkAutorunScope 校验作用域写权限（新建作用域与旧作用域都必须在权限内），失败时已写入响应
@@ -473,7 +506,7 @@ func PutTimetableRule(c *gin.Context) {
 	payload.Type = dbTable.AutorunTypeTimetable
 	timetableID, _ := content["timetableId"].(string)
 	if timetableID == "" {
-		badRequestInvalidArg(c, "timetableId 必须为非空字符串")
+		badRequestInvalidArg(c, msgTimetableRequired)
 		return
 	}
 	dateStr, _ := content["date"].(string)
@@ -518,7 +551,7 @@ func PutAllRule(c *gin.Context) {
 	dateStr, _ := content["date"].(string)
 	timetableID, _ := content["timetableId"].(string)
 	if timetableID == "" {
-		badRequestDetail(c, "timetableId 必须为非空字符串")
+		badRequestDetail(c, msgTimetableRequired)
 		return
 	}
 	if detail := validateScheduleAction(content); detail != "" {

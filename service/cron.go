@@ -12,7 +12,10 @@ import (
 
 const (
 	cronFieldCount = 5
-	cronMaxDays    = 366
+	// cronMaxDays 前后搜索的最大天数。2 月 29 日这类条件相邻两次命中可能相隔 8 年
+	// （如 2096-02-29 → 2104-02-29），窗口取 8 年；搜索是按天推进的，
+	// 只有命中日才做分钟级枚举，因此开销可以忽略。
+	cronMaxDays = 366 * 8
 )
 
 var cronFieldRanges = [cronFieldCount][2]int{
@@ -60,6 +63,56 @@ func IsValidCron(expr string) bool {
 	return ok
 }
 
+// cronTerm 逗号列表中的一项：取值范围 [lo, hi]，步长 step
+type cronTerm struct {
+	step int
+	lo   int
+	hi   int
+}
+
+func parseCronTerm(part string, minValue, maxValue int) (cronTerm, bool) {
+	if part == "" {
+		return cronTerm{}, false
+	}
+	step := 1
+	body := part
+	if idx := strings.Index(part, "/"); idx >= 0 {
+		n, err := strconv.Atoi(part[idx+1:])
+		if err != nil || n <= 0 {
+			return cronTerm{}, false
+		}
+		step, body = n, part[:idx]
+	}
+	lo, hi := minValue, maxValue
+	if body != "*" {
+		var ok bool
+		lo, hi, ok = parseCronBounds(body)
+		if !ok {
+			return cronTerm{}, false
+		}
+	}
+	if lo < minValue || hi > maxValue || lo > hi {
+		return cronTerm{}, false
+	}
+	return cronTerm{step: step, lo: lo, hi: hi}, true
+}
+
+func parseCronBounds(body string) (int, int, bool) {
+	bounds := strings.SplitN(body, "-", 2)
+	start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+	if len(bounds) == 1 {
+		return start, start, true
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
 func parseCronField(raw string, minValue, maxValue int) (cronField, bool) {
 	field := cronField{values: map[int]bool{}}
 	if raw == "*" {
@@ -67,39 +120,11 @@ func parseCronField(raw string, minValue, maxValue int) (cronField, bool) {
 		return field, true
 	}
 	for _, part := range strings.Split(raw, ",") {
-		if part == "" {
+		term, ok := parseCronTerm(part, minValue, maxValue)
+		if !ok {
 			return cronField{}, false
 		}
-		step := 1
-		body := part
-		if idx := strings.Index(part, "/"); idx >= 0 {
-			n, err := strconv.Atoi(part[idx+1:])
-			if err != nil || n <= 0 {
-				return cronField{}, false
-			}
-			step = n
-			body = part[:idx]
-		}
-		lo, hi := minValue, maxValue
-		if body != "*" {
-			bounds := strings.SplitN(body, "-", 2)
-			start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
-			if err != nil {
-				return cronField{}, false
-			}
-			lo, hi = start, start
-			if len(bounds) == 2 {
-				end, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
-				if err != nil {
-					return cronField{}, false
-				}
-				hi = end
-			}
-		}
-		if lo < minValue || hi > maxValue || lo > hi {
-			return cronField{}, false
-		}
-		for v := lo; v <= hi; v += step {
+		for v := term.lo; v <= term.hi; v += term.step {
 			field.values[v] = true
 		}
 	}

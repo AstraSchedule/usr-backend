@@ -65,6 +65,21 @@ func TestCronSpec_StepAndRange(t *testing.T) {
 	assert.False(t, spec.match(time.Date(2026, time.September, 1, 6, 10, 0, 0, time.UTC)))
 }
 
+func TestCronSpec_RareExpressionBeyondOneYear(t *testing.T) {
+	// 2 月 29 日：相邻两次命中可能相隔 4 年（甚至 8 年），搜索窗口必须覆盖
+	spec, ok := ParseCron("0 0 29 2 *")
+	require.True(t, ok)
+
+	// 2100 不是闰年，因此 2096-02-29 之后的下一次是 2104-02-29，间隔 8 年（> 366 天）
+	prev, ok := spec.Prev(time.Date(2104, time.January, 1, 0, 0, 0, 0, time.UTC))
+	require.True(t, ok, "8 年前的命中不应被搜索窗口漏掉")
+	assert.Equal(t, time.Date(2096, time.February, 29, 0, 0, 0, 0, time.UTC), prev)
+
+	next, ok := spec.Next(time.Date(2096, time.March, 1, 0, 0, 0, 0, time.UTC))
+	require.True(t, ok, "世纪闰年规则下 8 年后的命中同样要能找到")
+	assert.Equal(t, time.Date(2104, time.February, 29, 0, 0, 0, 0, time.UTC), next)
+}
+
 func TestCronSpec_DayOfMonthOrWeekday(t *testing.T) {
 	// 日与周同时受限：标准 cron 取「或」
 	spec, ok := ParseCron("0 0 1 * 1")
