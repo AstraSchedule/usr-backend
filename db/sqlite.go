@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -31,6 +32,8 @@ const (
 	sqliteConvertAttempts = 3
 	// sqliteConvertRetryDelay 每次重试前的等待时间（按次数递增）
 	sqliteConvertRetryDelay = 300 * time.Millisecond
+	// sqliteConvertTimeout 限制单次 journal 模式转换，避免被阻塞的连接拖住后续重试。
+	sqliteConvertTimeout = time.Duration(sqliteBusyTimeout) * time.Millisecond
 
 	// sqliteHeaderSize SQLite 库头长度。
 	sqliteHeaderSize = 100
@@ -161,8 +164,11 @@ func convertToRollbackJournal(dsn string) error {
 	}
 	defer func() { _ = conn.Close() }()
 
+	ctx, cancel := context.WithTimeout(context.Background(), sqliteConvertTimeout)
+	defer cancel()
+
 	var mode string
-	if err := conn.QueryRow("PRAGMA journal_mode=" + sqliteJournalMode).Scan(&mode); err != nil {
+	if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode="+sqliteJournalMode).Scan(&mode); err != nil {
 		return err
 	}
 	if !strings.EqualFold(mode, sqliteJournalMode) {
