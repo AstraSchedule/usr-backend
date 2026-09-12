@@ -39,8 +39,13 @@ func ConnectDb() *gorm.DB {
 					return
 				}
 			}
+			if err := checkNotWAL(model.Configs.Db.Path); err != nil {
+				dbErr = fmt.Errorf("SQLite 数据库不可用: %w", err)
+				logrus.Error(dbErr)
+				return
+			}
 			logrus.Infof("Connecting to SQLite database: %s", model.Configs.Db.Path)
-			dialector = gormsqlite.Open(fmt.Sprintf("%s?_busy_timeout=5000", model.Configs.Db.Path))
+			dialector = gormsqlite.Open(sqliteDSN(model.Configs.Db.Path))
 		default:
 
 			cfg := mysql.NewConfig()
