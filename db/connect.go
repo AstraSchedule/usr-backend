@@ -39,7 +39,7 @@ func ConnectDb() *gorm.DB {
 					return
 				}
 			}
-			if err := checkNotWAL(model.Configs.Db.Path); err != nil {
+			if err := ensureRollbackJournal(model.Configs.Db.Path); err != nil {
 				dbErr = fmt.Errorf("SQLite 数据库不可用: %w", err)
 				logrus.Error(dbErr)
 				return
