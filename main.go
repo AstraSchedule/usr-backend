@@ -130,6 +130,8 @@ func buildRouter() *gin.Engine {
 	secureWrite.PUT("/web/autorun/timetable", web.PutTimetableRule)
 	secureWrite.PUT("/web/autorun/schedule", web.PutScheduleRule)
 	secureWrite.PUT("/web/autorun/all", web.PutAllRule)
+	// v2 统一任务接口：一个任务可携带多条条目（单日 / 日期范围 / 每周轮换 / 事件 / cron）
+	secureWrite.PUT("/web/autorun/task", web.PutAutorunTask)
 
 	// 倒数日配置
 	router.GET("/web/countdown", web.GetCountdownStatus)
