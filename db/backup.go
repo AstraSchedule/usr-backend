@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -332,13 +333,80 @@ func importIDRows(tx *gorm.DB, rows interface{}, idCol string, updateCols []stri
 	return 0, nil
 }
 
+// hashIDOwnerNamespaces 按 ID 查出这些记录当前所属的命名空间。
+// 仅用于导入前的归属校验：autorun/countdown 的主键是全局唯一的字符串 ID，
+// 而导入走 OnConflict(id)+UpdateAll（更新列里包含 namespace），
+// 因此「ID 属于别的租户」时必须先拦下来，否则会覆盖对方记录并改写其 namespace。
+func hashIDOwnerNamespaces(tx *gorm.DB, model interface{}, idCol string, ids []string) (map[string]string, error) {
+	owners := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return owners, nil
+	}
+	type ownerRow struct {
+		ID        string
+		Namespace string
+	}
+	found := make([]ownerRow, 0, len(ids))
+	err := tx.Model(model).
+		Select(idCol+" AS id, namespace AS namespace").
+		Where(idCol+" IN ?", ids).
+		Find(&found).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range found {
+		owners[row.ID] = row.Namespace
+	}
+	return owners, nil
+}
+
+// dropCrossNamespaceRows 丢弃「ID 已属于其它命名空间」的导入行并统计数量。
+// 典型场景：一份来自无命名空间版本（ID 哈希不含 namespace）的旧备份被导入到多个租户，
+// 两边算出的 ID 相同——第二次导入会覆盖第一个租户的记录。
+func dropCrossNamespaceRows[T any](tx *gorm.DB, rows []T, model interface{}, idCol string, idOf func(T) string, nsOf func(T) string) ([]T, int, error) {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, idOf(row))
+	}
+	owners, err := hashIDOwnerNamespaces(tx, model, idCol, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	kept := make([]T, 0, len(rows))
+	skipped := 0
+	for _, row := range rows {
+		owner, exists := owners[idOf(row)]
+		if exists && owner != nsOf(row) {
+			skipped++
+			continue
+		}
+		kept = append(kept, row)
+	}
+	if skipped > 0 {
+		logrus.Warnf("备份导入：跳过 %d 条 ID 已属于其它命名空间的记录（表 %s）", skipped, idCol)
+	}
+	return kept, skipped, nil
+}
+
 func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string) (int, error) {
+	rows, _, err := dropCrossNamespaceRows(tx, rows, &dbTable.AutorunRecord{}, "hash_id",
+		func(r dbTable.AutorunRecord) string { return r.HashID },
+		func(r dbTable.AutorunRecord) string { return r.Namespace })
+	if err != nil {
+		return 0, err
+	}
 	return importIDRows(tx, rows, "hash_id", []string{
 		"namespace", "name", "e_type", "scope", "disabled", "entries", "parameters", "level", "status", "created_at", "updated_at",
 	}, mode)
 }
 
 func importCountdownRecords(tx *gorm.DB, rows []dbTable.CountdownRecord, mode string) (int, error) {
+	rows, _, err := dropCrossNamespaceRows(tx, rows, &dbTable.CountdownRecord{}, "id",
+		func(r dbTable.CountdownRecord) string { return r.ID },
+		func(r dbTable.CountdownRecord) string { return r.Namespace })
+	if err != nil {
+		return 0, err
+	}
 	return importIDRows(tx, rows, "id", []string{
 		"namespace", "scope", "schedules", "created_at", "updated_at",
 	}, mode)
