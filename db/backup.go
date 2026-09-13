@@ -334,7 +334,7 @@ func importIDRows(tx *gorm.DB, rows interface{}, idCol string, updateCols []stri
 
 func importAutorunRecords(tx *gorm.DB, rows []dbTable.AutorunRecord, mode string) (int, error) {
 	return importIDRows(tx, rows, "hash_id", []string{
-		"namespace", "e_type", "scope", "parameters", "level", "status", "created_at", "updated_at",
+		"namespace", "name", "e_type", "scope", "disabled", "entries", "parameters", "level", "status", "created_at", "updated_at",
 	}, mode)
 }
 
