@@ -12,8 +12,12 @@ import (
 // 2026-09-01 是周二，所在周（周一 2026-08-31 起）为第 1 周
 const testTermStart = "2026-09-01"
 
-func day(y int, m time.Month, d int, hour int) time.Time {
-	return time.Date(y, m, d, hour, 0, 0, 0, time.UTC)
+func day(y int, m time.Month, d int, hour int, minute ...int) time.Time {
+	min := 0
+	if len(minute) > 0 {
+		min = minute[0]
+	}
+	return time.Date(y, m, d, hour, min, 0, 0, time.UTC)
 }
 
 func weeklyCondition(every, offset int) *dbTable.AutorunCondition {
@@ -302,6 +306,49 @@ func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 	weekdayWeekly := recordWithCondition("weekday", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
 	weekdayWeekly.Entries[0].When.Weekdays = []int{1}
 	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekdayWeekly}, "s", "g", "c", now))
+}
+
+// 带 Weekdays 的范围条件：命中集合每天零点切换，边界必须是下一个零点而不是终点
+func TestVersionBoundary_RangeWithWeekdaysUsesNextMidnight(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+	when := &dbTable.AutorunCondition{
+		Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-12-31", Weekdays: []int{3},
+	}
+	record := recordWithCondition("range-weekday", dbTable.AutorunTypeTimetable, []string{"s"}, when)
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", now))
+}
+
+// cron + duration：窗口内部的下一次状态切换是「窗口结束」，而不是下一次命中
+func TestVersionBoundary_CronWithDurationUsesWindowEnd(t *testing.T) {
+	when := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *", Duration: 60}
+	record := recordWithCondition("cron-window", dbTable.AutorunTypeTimetable, []string{"s"}, when)
+
+	// 08:30 处于 08:00-09:00 窗口内 → 边界是 09:00
+	inside := day(2026, time.September, 1, 8, 30)
+	assert.Equal(t, day(2026, time.September, 1, 9).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", inside))
+
+	// 07:00 尚未进入窗口 → 边界是当天的 08:00
+	before := day(2026, time.September, 1, 7)
+	assert.Equal(t, day(2026, time.September, 1, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", before))
+
+	// 09:30 窗口已结束 → 边界是第二天的 08:00
+	after := day(2026, time.September, 1, 9, 30)
+	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", after))
+}
+
+// 纯周次条件若带起止日期，也要在起止时刻产生边界
+func TestVersionBoundary_WeeklyWithDateBounds(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+
+	withFutureStart := weeklyCondition(2, 0)
+	withFutureStart.StartDate = "2026-09-20"
+	startRecord := recordWithCondition("week-start", dbTable.AutorunTypeTimetable, []string{"s"}, withFutureStart)
+	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{startRecord}, "s", "g", "c", now))
+
+	withEnd := weeklyCondition(2, 0)
+	withEnd.EndDate = "2026-09-30"
+	endRecord := recordWithCondition("week-end", dbTable.AutorunTypeTimetable, []string{"s"}, withEnd)
+	assert.Equal(t, day(2026, time.October, 1, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
 }
 
 func TestVersionBoundary_MultipleRecordsTakesEarliest(t *testing.T) {

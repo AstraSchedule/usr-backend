@@ -43,6 +43,52 @@ func parseScopeInput(raw interface{}) []string {
 	}
 }
 
+// parseScopeInputStrict 解析写入用的 scope：格式非法时报错，绝不静默转成 ALL。
+// 旧版 parseScopeInput 会把对象、数字、空数组、混入非字符串的数组一律变成 []string{"ALL"}，
+// 于是「请求写错了」会变成「写出一条全站生效的规则」——这里必须显式拒绝。
+// 仅 raw == nil（字段缺省）保留 ALL 这一文档化的默认值。
+func parseScopeInputStrict(raw interface{}) ([]string, string) {
+	switch v := raw.(type) {
+	case nil:
+		return []string{"ALL"}, ""
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, "scope 不能为空字符串"
+		}
+		return []string{trimmed}, ""
+	case []string:
+		return normalizeScopeEntries(v)
+	case []interface{}:
+		list := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, "scope 只能由字符串组成"
+			}
+			list = append(list, s)
+		}
+		return normalizeScopeEntries(list)
+	default:
+		return nil, "scope 必须为字符串或字符串数组"
+	}
+}
+
+func normalizeScopeEntries(list []string) ([]string, string) {
+	if len(list) == 0 {
+		return nil, "scope 不能为空数组"
+	}
+	out := make([]string, 0, len(list))
+	for _, raw := range list {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return nil, "scope 不能包含空字符串"
+		}
+		out = append(out, trimmed)
+	}
+	return out, ""
+}
+
 func makeHashID(etype int, scope []string, level int, parameters map[string]interface{}) string {
 	sum := sha256.Sum256([]byte(strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + stableMapString(parameters)))
 	return hex.EncodeToString(sum[:])[:16]

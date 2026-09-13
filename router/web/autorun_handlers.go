@@ -251,9 +251,22 @@ func saveAutorunRecord(c *gin.Context, record dbTable.AutorunRecord, oldScopes [
 	return true
 }
 
+// resolveAutorunScope 解析写入用的 scope；格式非法时写入 400 并返回 false
+func resolveAutorunScope(c *gin.Context, raw interface{}) ([]string, bool) {
+	scope, detail := parseScopeInputStrict(raw)
+	if detail != "" {
+		badRequestInvalidArg(c, detail)
+		return nil, false
+	}
+	return scope, true
+}
+
 // persistAutorunRule 兼容 v1 的按类型写入：内容被包装成任务内的唯一一条条目
 func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
-	scope := parseScopeInput(payload.Scope)
+	scope, ok := resolveAutorunScope(c, payload.Scope)
+	if !ok {
+		return
+	}
 	if !checkAutorunScope(c, scope) {
 		return
 	}
@@ -312,7 +325,10 @@ func PutAutorunTask(c *gin.Context) {
 			Action:   input.Action,
 		})
 	}
-	scope := parseScopeInput(payload.Scope)
+	scope, ok := resolveAutorunScope(c, payload.Scope)
+	if !ok {
+		return
+	}
 	if !checkAutorunScope(c, scope) {
 		return
 	}

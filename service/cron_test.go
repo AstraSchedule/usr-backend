@@ -75,6 +75,29 @@ func TestCronSpec_NextKeepsLaterHitInSameHour(t *testing.T) {
 	assert.Equal(t, time.Date(2026, time.September, 1, 8, 30, 0, 0, time.UTC), next)
 }
 
+// DST 切换日必须按本地墙钟取命中时刻：不能用 day.Add(绝对时长)，否则本地 08:00 会变成 07:00/09:00
+func TestCronSpec_DaylightSavingUsesWallClock(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("时区数据不可用，跳过 DST 用例")
+	}
+	spec, ok := ParseCron("0 8 * * *")
+	require.True(t, ok)
+
+	// 2026-03-08 是美国夏令时开始日（当地 02:00 跳到 03:00）
+	next, ok := spec.Next(time.Date(2026, time.March, 8, 0, 0, 0, 0, location))
+	require.True(t, ok)
+	assert.Equal(t, 8, next.Hour(), "命中时刻应为本地 08:00")
+	assert.Equal(t, 0, next.Minute())
+	assert.Equal(t, 8, next.Day())
+
+	// 2026-11-01 是夏令时结束日（当地 02:00 回到 01:00）
+	prev, ok := spec.Prev(time.Date(2026, time.November, 1, 12, 0, 0, 0, location))
+	require.True(t, ok)
+	assert.Equal(t, 8, prev.Hour(), "命中时刻应为本地 08:00")
+	assert.Equal(t, 0, prev.Minute())
+}
+
 func TestCronSpec_RareExpressionBeyondOneYear(t *testing.T) {
 	// 2 月 29 日：相邻两次命中可能相隔 4 年（甚至 8 年），搜索窗口必须覆盖
 	spec, ok := ParseCron("0 0 29 2 *")

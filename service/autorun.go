@@ -252,24 +252,70 @@ func VersionBoundary(records []dbTable.AutorunRecord, school, grade, classNumber
 	return boundary
 }
 
-// entryNextBoundary 计算条目下一次改变命中结果的时刻；0 表示不会再变化
+// entryNextBoundary 计算条目下一次改变命中结果的时刻；0 表示不会再变化。
+// 需要覆盖 MatchCondition 里所有会让命中结果翻转的时点：日期上下界、限定星期的每日零点、
+// cron 命中点与带 duration 的窗口结束点。
 func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	when := e.When
 	if when == nil {
 		return 0
 	}
-	switch when.Kind {
-	case dbTable.AutorunWhenDate:
+	if when.Kind == "" || when.Kind == dbTable.AutorunWhenDate {
 		return dateNextBoundary(when, ctx)
-	case dbTable.AutorunWhenRange:
-		return rangeNextBoundary(when, ctx)
-	case dbTable.AutorunWhenCron:
-		return cronNextBoundary(when, ctx)
-	case dbTable.AutorunWhenWeekly:
-		return weeklyNextBoundary(when, ctx)
-	default:
-		return 0
 	}
+	now := ctx.Now
+	location := now.Location()
+	candidates := make([]time.Time, 0, 4)
+	// 生效区间上下界
+	if start, ok := parseConditionDate(when.StartDate, location); ok && now.Before(start) {
+		candidates = append(candidates, start)
+	}
+	if end, ok := parseConditionDate(when.EndDate, location); ok {
+		if endExclusive := end.AddDate(0, 0, 1); now.Before(endExclusive) {
+			candidates = append(candidates, endExclusive)
+		}
+	}
+	// 限定星期：命中集合每天零点切换一次
+	if len(when.Weekdays) > 0 {
+		candidates = append(candidates, dateOnly(now).AddDate(0, 0, 1))
+	}
+	if when.Kind == dbTable.AutorunWhenCron {
+		candidates = append(candidates, cronBoundaries(when, now)...)
+	}
+	return earliestUnix(candidates)
+}
+
+// cronBoundaries 返回 cron 条件后续的状态切换点：当前窗口（带 duration）的结束时刻、下一次命中时刻
+func cronBoundaries(when *dbTable.AutorunCondition, now time.Time) []time.Time {
+	spec, ok := ParseCron(when.Cron)
+	if !ok {
+		return nil
+	}
+	out := make([]time.Time, 0, 2)
+	if when.Duration > 0 {
+		if start, ok := spec.Prev(now); ok {
+			if end := start.Add(time.Duration(when.Duration) * time.Minute); now.Before(end) {
+				out = append(out, end)
+			}
+		}
+	}
+	if next, ok := spec.Next(now); ok {
+		out = append(out, next)
+	}
+	return out
+}
+
+func earliestUnix(candidates []time.Time) int64 {
+	earliest := int64(0)
+	for _, candidate := range candidates {
+		if candidate.IsZero() || candidate.Unix() <= 0 {
+			continue
+		}
+		if earliest == 0 || candidate.Unix() < earliest {
+			earliest = candidate.Unix()
+		}
+	}
+	return earliest
 }
 
 // dateNextBoundary 单日条件：未来日期从当日零点开始生效，当天则到次日零点结束
@@ -286,50 +332,6 @@ func dateNextBoundary(when *dbTable.AutorunCondition, ctx RuleContext) int64 {
 		return end.Unix()
 	}
 	return 0
-}
-
-// rangeNextBoundary 日期范围：未来起点开始生效；有终点的在终点次日失效；无终点的不会再变化
-func rangeNextBoundary(when *dbTable.AutorunCondition, ctx RuleContext) int64 {
-	location := ctx.Now.Location()
-	if start, ok := parseConditionDate(when.StartDate, location); ok && ctx.Now.Before(start) {
-		return start.Unix()
-	}
-	end, ok := parseConditionDate(when.EndDate, location)
-	if !ok {
-		return 0
-	}
-	endExclusive := end.AddDate(0, 0, 1)
-	if ctx.Now.Before(endExclusive) {
-		return endExclusive.Unix()
-	}
-	return 0
-}
-
-func cronNextBoundary(when *dbTable.AutorunCondition, ctx RuleContext) int64 {
-	spec, ok := ParseCron(when.Cron)
-	if !ok {
-		return 0
-	}
-	next, ok := spec.Next(ctx.Now)
-	if !ok {
-		return 0
-	}
-	return next.Unix()
-}
-
-// weeklyNextBoundary 纯周次条件只在周切换时变化（周次已写进版本串）；限定星期时每天零点变化一次
-func weeklyNextBoundary(when *dbTable.AutorunCondition, ctx RuleContext) int64 {
-	if len(when.Weekdays) == 0 {
-		return 0
-	}
-	location := ctx.Now.Location()
-	if end, ok := parseConditionDate(when.EndDate, location); ok && !ctx.Now.Before(end.AddDate(0, 0, 1)) {
-		return 0
-	}
-	if start, ok := parseConditionDate(when.StartDate, location); ok && ctx.Now.Before(start) {
-		return start.Unix()
-	}
-	return dateOnly(ctx.Now).AddDate(0, 0, 1).Unix()
 }
 
 // EntryWindow 返回条目在时间轴上的生效区间（用于任务状态推导）。

@@ -170,6 +170,72 @@ func TestPutAutorunTask_InvalidPayloads(t *testing.T) {
 	}
 }
 
+// 格式错误的 scope 必须被拒绝，绝不能静默变成全站生效的 ALL 规则
+func TestPutAutorunTask_RejectsMalformedScope(t *testing.T) {
+	ensureTestDB()
+	router := taskRouter(t)
+
+	malformed := []struct {
+		name  string
+		scope interface{}
+	}{
+		{"对象", map[string]interface{}{"school": "s1"}},
+		{"数字", 123},
+		{"布尔", true},
+		{"空数组", []string{}},
+		{"空字符串", ""},
+		{"空字符串元素", []string{"s1", ""}},
+		{"混合类型数组", []interface{}{"s1", 5}},
+	}
+	for _, tc := range malformed {
+		t.Run(tc.name, func(t *testing.T) {
+			body := timetableTaskBody([]map[string]interface{}{weeklyEntry("e1", 2, 0, "exam")})
+			body["scope"] = tc.scope
+			w := doRequest(t, router, "PUT", "/web/autorun/task", body)
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
+
+	// 合法输入不受影响：数组、单字符串、以及字段缺省（沿用 ALL 默认值）
+	okBodies := []interface{}{
+		[]string{"s1/g1"},
+		"s1/g1",
+		nil,
+	}
+	for i, scope := range okBodies {
+		body := timetableTaskBody([]map[string]interface{}{weeklyEntry("e1", 2, 0, "exam")})
+		if scope == nil {
+			delete(body, "scope")
+		} else {
+			body["scope"] = scope
+		}
+		w := doRequest(t, router, "PUT", "/web/autorun/task", body)
+		assert.Equal(t, http.StatusOK, w.Code, "case %d: %s", i, w.Body.String())
+	}
+}
+
+// 旧版按类型写入接口同样不能把非法 scope 变成 ALL
+func TestPutCompensationRule_RejectsMalformedScope(t *testing.T) {
+	ensureTestDB()
+	router := setupTestRouter()
+	router.PUT("/web/autorun/compensation", adminOnly(t), PutCompensationRule)
+
+	before, err := db.FetchAutorunRecords("")
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"type": dbTable.AutorunTypeCompensation, "scope": map[string]interface{}{"oops": true}, "priority": 1,
+		"content": map[string]interface{}{"date": "2026-10-01", "useDate": "2026-09-29"},
+	}
+	w := doRequest(t, router, "PUT", "/web/autorun/compensation", body)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+	// 确认这次请求没有落下任何规则（尤其不能落下 ALL 级规则）
+	after, err := db.FetchAutorunRecords("")
+	require.NoError(t, err)
+	assert.Len(t, after, len(before), "非法 scope 不应写入任何记录")
+}
+
 func TestPutAutorunTask_ScheduleAndCompensation(t *testing.T) {
 	ensureTestDB()
 	router := taskRouter(t)
