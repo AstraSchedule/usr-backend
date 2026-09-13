@@ -13,11 +13,11 @@ import (
 const testTermStart = "2026-09-01"
 
 func day(y int, m time.Month, d int, hour int, minute ...int) time.Time {
-	min := 0
+	minuteOfHour := 0
 	if len(minute) > 0 {
-		min = minute[0]
+		minuteOfHour = minute[0]
 	}
-	return time.Date(y, m, d, hour, min, 0, 0, time.UTC)
+	return time.Date(y, m, d, hour, minuteOfHour, 0, 0, time.UTC)
 }
 
 func weeklyCondition(every, offset int) *dbTable.AutorunCondition {

@@ -226,11 +226,11 @@ func checkAutorunScope(c *gin.Context, scopes ...[]string) bool {
 	return true
 }
 
-// ensureHashIDOnwership 校验客户端自带的 hashID 不属于其它命名空间。
+// ensureHashIDOwnership 校验客户端自带的 hashID 不属于其它命名空间。
 // 主键是全局唯一的 hash_id，而 Upsert 使用 OnConflict(hash_id)+UpdateAll：
 // 若放任客户端指定一个已属于别的租户的 ID，就能连 Namespace/Scope/Entries 一起改写别人的记录。
 // 归属冲突时写入 409 并返回 false。
-func ensureHashIDOnwership(c *gin.Context, ns, hashID string) bool {
+func ensureHashIDOwnership(c *gin.Context, ns, hashID string) bool {
 	if hashID == "" {
 		return true
 	}
@@ -293,15 +293,10 @@ func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[strin
 	if !checkAutorunScope(c, scope) {
 		return
 	}
-	if !ensureHashIDOnwership(c, ns, hashID) {
-		return
-	}
-	existing, found := loadAutorunRecord(ns, hashID)
-	if hashID == "" {
-		hashID = makeHashID(ns, payload.Type, scope, payload.Priority, params)
-		existing, found = loadAutorunRecord(ns, hashID)
-	}
-	if found && !checkAutorunScope(c, existing.Scope) {
+	existing, hashID, ok := resolveAutorunTarget(c, ns, hashID, func() string {
+		return makeHashID(ns, payload.Type, scope, payload.Priority, params)
+	})
+	if !ok {
 		return
 	}
 	record := dbTable.AutorunRecord{
@@ -313,10 +308,48 @@ func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[strin
 		Level:      payload.Priority,
 		Status:     0,
 	}
-	if found {
+	if existing.HashID != "" {
 		record.CreatedAt = existing.CreatedAt
 	}
 	saveAutorunRecord(c, ns, record, existing.Scope)
+}
+
+// resolveAutorunTarget 定位写入目标：未带 ID 时用 computeHash 生成，
+// 并校验既有记录的作用域写权限。失败时已写入响应。
+func resolveAutorunTarget(c *gin.Context, ns, hashID string, computeHash func() string) (dbTable.AutorunRecord, string, bool) {
+	if !ensureHashIDOwnership(c, ns, hashID) {
+		return dbTable.AutorunRecord{}, "", false
+	}
+	existing, found := loadAutorunRecord(ns, hashID)
+	if hashID == "" {
+		hashID = computeHash()
+		existing, found = loadAutorunRecord(ns, hashID)
+	}
+	if found && !checkAutorunScope(c, existing.Scope) {
+		return dbTable.AutorunRecord{}, "", false
+	}
+	return existing, hashID, true
+}
+
+// buildAutorunEntries 校验并规范化请求里的条目，返回错误详情（空串表示通过）
+func buildAutorunEntries(payload autorunTaskPayload) ([]dbTable.AutorunEntry, string) {
+	entries := make([]dbTable.AutorunEntry, 0, len(payload.Entries))
+	for i, input := range payload.Entries {
+		if detail := validateEntryAction(payload.Type, input.Action); detail != "" {
+			return nil, fmt.Sprintf("entries[%d]: %s", i, detail)
+		}
+		if detail := validateEntryCondition(input.When, payload.Type); detail != "" {
+			return nil, fmt.Sprintf("entries[%d]: %s", i, detail)
+		}
+		entries = append(entries, dbTable.AutorunEntry{
+			ID:       entryID(input.ID, i),
+			Disabled: input.Enabled != nil && !*input.Enabled,
+			Note:     input.Note,
+			When:     input.When,
+			Action:   input.Action,
+		})
+	}
+	return entries, ""
 }
 
 // PutAutorunTask 统一任务写入接口：一个任务携带若干条目（单日/范围/每周轮换/事件/cron）
@@ -335,42 +368,20 @@ func PutAutorunTask(c *gin.Context) {
 		badRequestInvalidArg(c, "entries 不能为空")
 		return
 	}
-	entries := make([]dbTable.AutorunEntry, 0, len(payload.Entries))
-	for i, input := range payload.Entries {
-		if detail := validateEntryAction(payload.Type, input.Action); detail != "" {
-			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
-			return
-		}
-		if detail := validateEntryCondition(input.When, payload.Type); detail != "" {
-			badRequestDetail(c, fmt.Sprintf("entries[%d]: %s", i, detail))
-			return
-		}
-		entries = append(entries, dbTable.AutorunEntry{
-			ID:       entryID(input.ID, i),
-			Disabled: input.Enabled != nil && !*input.Enabled,
-			Note:     input.Note,
-			When:     input.When,
-			Action:   input.Action,
-		})
+	entries, detail := buildAutorunEntries(payload)
+	if detail != "" {
+		badRequestDetail(c, detail)
+		return
 	}
 	scope, ok := resolveAutorunScope(c, payload.Scope)
+	if !ok || !checkAutorunScope(c, scope) {
+		return
+	}
+	existing, hashID, ok := resolveAutorunTarget(c, ns, payload.ID, func() string {
+		return makeTaskHashID(ns, payload.Type, scope, payload.Priority, payload.Name, entries)
+	})
 	if !ok {
 		return
-	}
-	if !checkAutorunScope(c, scope) {
-		return
-	}
-	if !ensureHashIDOnwership(c, ns, payload.ID) {
-		return
-	}
-	existing, found := loadAutorunRecord(ns, payload.ID)
-	if found && !checkAutorunScope(c, existing.Scope) {
-		return
-	}
-	hashID := payload.ID
-	if hashID == "" {
-		hashID = makeTaskHashID(ns, payload.Type, scope, payload.Priority, payload.Name, entries)
-		existing, found = loadAutorunRecord(ns, hashID)
 	}
 	record := dbTable.AutorunRecord{
 		HashID:     hashID,
@@ -384,7 +395,7 @@ func PutAutorunTask(c *gin.Context) {
 		Level:      payload.Priority,
 		Status:     0,
 	}
-	if found {
+	if existing.HashID != "" {
 		record.CreatedAt = existing.CreatedAt
 	}
 	saveAutorunRecord(c, ns, record, existing.Scope)
