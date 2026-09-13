@@ -30,6 +30,20 @@ func FetchAutorunRecordsNs(namespace, hashid string) ([]dbTable.AutorunRecord, e
 	return records, err
 }
 
+// FetchAutorunRecordNamespacesByHash 按 hash_id 跨 namespace 查询记录所属的命名空间。
+// 仅用于写入前的归属校验：主键是全局唯一的 hash_id，客户端若自带一个已属于其它租户的 ID，
+// Upsert(UpdateAll) 会连 Namespace 一起改写，必须在校验后拒绝。
+func FetchAutorunRecordNamespacesByHash(hashid string) ([]string, error) {
+	out := make([]string, 0)
+	if hashid == "" {
+		return out, nil
+	}
+	err := GetDB().Model(&dbTable.AutorunRecord{}).
+		Where(hashIDWhere, hashid).
+		Pluck("namespace", &out).Error
+	return out, err
+}
+
 // DeleteAutorunRecord 删除自动任务记录（无命名空间，向后兼容）
 func DeleteAutorunRecord(hashid string) (int64, error) {
 	return DeleteAutorunRecordNs("", hashid)

@@ -190,6 +190,13 @@ func (s cronSpec) Next(t time.Time) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// cronHitAt 按「本地墙钟」构造命中时刻。
+// 不能用 day.Add(hour*time.Hour + minute*time.Minute)：那是加绝对时长，
+// 在 DST 切换日会把本地 08:00 算成 07:00 或 09:00，导致窗口与版本边界偏移。
+func cronHitAt(day time.Time, hour, minute int) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, day.Location())
+}
+
 func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
 	// 只有与 limit 同一天时才需要按 limit 截断，更早的日子整天都可取（从 23 时开始倒推）
 	onLimitDay := sameDate(day, limit)
@@ -209,7 +216,7 @@ func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
 			if !s.minute.match(minute) {
 				continue
 			}
-			candidate := day.Add(time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute)
+			candidate := cronHitAt(day, hour, minute)
 			if !candidate.After(limit) {
 				return candidate, true
 			}
@@ -227,7 +234,7 @@ func (s cronSpec) firstHitOfDay(day, limit time.Time, strictlyAfterDay bool) (ti
 			if !s.minute.match(minute) {
 				continue
 			}
-			candidate := day.Add(time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute)
+			candidate := cronHitAt(day, hour, minute)
 			if strictlyAfterDay || candidate.After(limit) {
 				return candidate, true
 			}

@@ -226,6 +226,28 @@ func checkAutorunScope(c *gin.Context, scopes ...[]string) bool {
 	return true
 }
 
+// ensureHashIDOnwership 校验客户端自带的 hashID 不属于其它命名空间。
+// 主键是全局唯一的 hash_id，而 Upsert 使用 OnConflict(hash_id)+UpdateAll：
+// 若放任客户端指定一个已属于别的租户的 ID，就能连 Namespace/Scope/Entries 一起改写别人的记录。
+// 归属冲突时写入 409 并返回 false。
+func ensureHashIDOnwership(c *gin.Context, ns, hashID string) bool {
+	if hashID == "" {
+		return true
+	}
+	namespaces, err := db.FetchAutorunRecordNamespacesByHash(hashID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	for _, owner := range namespaces {
+		if owner != ns {
+			c.JSON(http.StatusConflict, gin.H{"detail": "任务 ID 已属于其它租户"})
+			return false
+		}
+	}
+	return true
+}
+
 // loadAutorunRecord 读取既有任务，用于取回旧作用域与创建时间
 func loadAutorunRecord(ns, hashID string) (dbTable.AutorunRecord, bool) {
 	if hashID == "" {
@@ -251,11 +273,27 @@ func saveAutorunRecord(c *gin.Context, ns string, record dbTable.AutorunRecord, 
 	return true
 }
 
+// resolveAutorunScope 解析写入用的 scope；格式非法时写入 400 并返回 false
+func resolveAutorunScope(c *gin.Context, raw interface{}) ([]string, bool) {
+	scope, detail := parseScopeInputStrict(raw)
+	if detail != "" {
+		badRequestInvalidArg(c, detail)
+		return nil, false
+	}
+	return scope, true
+}
+
 // persistAutorunRule 兼容 v1 的按类型写入：内容被包装成任务内的唯一一条条目
 func persistAutorunRule(c *gin.Context, payload autorunPayload, params map[string]interface{}, hashID string) {
 	ns := middleware.GetNamespace(c)
-	scope := parseScopeInput(payload.Scope)
+	scope, ok := resolveAutorunScope(c, payload.Scope)
+	if !ok {
+		return
+	}
 	if !checkAutorunScope(c, scope) {
+		return
+	}
+	if !ensureHashIDOnwership(c, ns, hashID) {
 		return
 	}
 	existing, found := loadAutorunRecord(ns, hashID)
@@ -315,8 +353,14 @@ func PutAutorunTask(c *gin.Context) {
 			Action:   input.Action,
 		})
 	}
-	scope := parseScopeInput(payload.Scope)
+	scope, ok := resolveAutorunScope(c, payload.Scope)
+	if !ok {
+		return
+	}
 	if !checkAutorunScope(c, scope) {
+		return
+	}
+	if !ensureHashIDOnwership(c, ns, payload.ID) {
 		return
 	}
 	existing, found := loadAutorunRecord(ns, payload.ID)
@@ -325,7 +369,7 @@ func PutAutorunTask(c *gin.Context) {
 	}
 	hashID := payload.ID
 	if hashID == "" {
-		hashID = makeTaskHashID(payload.Type, scope, payload.Priority, payload.Name, entries)
+		hashID = makeTaskHashID(ns, payload.Type, scope, payload.Priority, payload.Name, entries)
 		existing, found = loadAutorunRecord(ns, hashID)
 	}
 	record := dbTable.AutorunRecord{
