@@ -79,6 +79,49 @@ func validateClientConfigAction(action map[string]interface{}) string {
 	return ""
 }
 
+// swapSide 调课的一端（节次从 1 开始）
+type swapSide struct {
+	date   string
+	period int
+}
+
+// parseSwapSide 解析调课的一端，返回错误详情（空串表示通过）
+func parseSwapSide(raw interface{}, fieldName string) (swapSide, string) {
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return swapSide{}, fieldName + " 必须为对象"
+	}
+	date, _ := obj["date"].(string)
+	if !isValidDate(date) {
+		return swapSide{}, fieldName + ".date 格式错误"
+	}
+	period, ok := serviceAsInt(obj["period"])
+	if !ok || period <= 0 {
+		return swapSide{}, fieldName + ".period 必须为正整数"
+	}
+	return swapSide{date: date, period: period}, ""
+}
+
+// validateSwapAction 校验调课内容：两端都要有合法日期与节次，且不能是同一节课
+func validateSwapAction(action map[string]interface{}) string {
+	swapObj, ok := action["swap"].(map[string]interface{})
+	if !ok {
+		return "swap 必须为对象"
+	}
+	from, detail := parseSwapSide(swapObj["from"], "swap.from")
+	if detail != "" {
+		return detail
+	}
+	to, detail := parseSwapSide(swapObj["to"], "swap.to")
+	if detail != "" {
+		return detail
+	}
+	if from.date == to.date && from.period == to.period {
+		return "swap.from 与 swap.to 不能是同一节课"
+	}
+	return ""
+}
+
 // validateEntryAction 校验条目内容，返回错误详情（空串表示通过）
 func validateEntryAction(etype int, action map[string]interface{}) string {
 	if len(action) == 0 {
@@ -103,8 +146,10 @@ func validateEntryAction(etype int, action map[string]interface{}) string {
 		return validateScheduleAction(action)
 	case dbTable.AutorunTypeClientConfig:
 		return validateClientConfigAction(action)
+	case dbTable.AutorunTypeLessonSwap:
+		return validateSwapAction(action)
 	default:
-		return "type 必须为 0-" + strconv.Itoa(dbTable.AutorunTypeClientConfig)
+		return "type 必须为 0-" + strconv.Itoa(dbTable.AutorunTypeMax)
 	}
 	return ""
 }
@@ -333,8 +378,8 @@ func PutAutorunTask(c *gin.Context) {
 		badRequestInvalidArg(c, err.Error())
 		return
 	}
-	if payload.Type < 0 || payload.Type > dbTable.AutorunTypeClientConfig {
-		badRequestInvalidArg(c, "type 必须为 0-"+strconv.Itoa(dbTable.AutorunTypeClientConfig))
+	if payload.Type < 0 || payload.Type > dbTable.AutorunTypeMax {
+		badRequestInvalidArg(c, "type 必须为 0-"+strconv.Itoa(dbTable.AutorunTypeMax))
 		return
 	}
 	if len(payload.Entries) == 0 {
@@ -404,6 +449,8 @@ func autorunTypeName(etype int) string {
 		return "ALL"
 	case dbTable.AutorunTypeClientConfig:
 		return "CLIENT_CONFIG"
+	case dbTable.AutorunTypeLessonSwap:
+		return "LESSON_SWAP"
 	default:
 		return strconv.Itoa(etype)
 	}
