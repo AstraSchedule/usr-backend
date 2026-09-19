@@ -12,8 +12,12 @@ import (
 // 2026-09-01 是周二，所在周（周一 2026-08-31 起）为第 1 周
 const testTermStart = "2026-09-01"
 
-func day(y int, m time.Month, d int, hour int) time.Time {
-	return time.Date(y, m, d, hour, 0, 0, 0, time.UTC)
+func day(y int, m time.Month, d int, hour int, minute ...int) time.Time {
+	minuteOfHour := 0
+	if len(minute) > 0 {
+		minuteOfHour = minute[0]
+	}
+	return time.Date(y, m, d, hour, minuteOfHour, 0, 0, time.UTC)
 }
 
 func weeklyCondition(every, offset int) *dbTable.AutorunCondition {
@@ -304,6 +308,49 @@ func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekdayWeekly}, "s", "g", "c", now))
 }
 
+// 带 Weekdays 的范围条件：命中集合每天零点切换，边界必须是下一个零点而不是终点
+func TestVersionBoundary_RangeWithWeekdaysUsesNextMidnight(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+	when := &dbTable.AutorunCondition{
+		Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-12-31", Weekdays: []int{3},
+	}
+	record := recordWithCondition("range-weekday", dbTable.AutorunTypeTimetable, []string{"s"}, when)
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", now))
+}
+
+// cron + duration：窗口内部的下一次状态切换是「窗口结束」，而不是下一次命中
+func TestVersionBoundary_CronWithDurationUsesWindowEnd(t *testing.T) {
+	when := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *", Duration: 60}
+	record := recordWithCondition("cron-window", dbTable.AutorunTypeTimetable, []string{"s"}, when)
+
+	// 08:30 处于 08:00-09:00 窗口内 → 边界是 09:00
+	inside := day(2026, time.September, 1, 8, 30)
+	assert.Equal(t, day(2026, time.September, 1, 9).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", inside))
+
+	// 07:00 尚未进入窗口 → 边界是当天的 08:00
+	before := day(2026, time.September, 1, 7)
+	assert.Equal(t, day(2026, time.September, 1, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", before))
+
+	// 09:30 窗口已结束 → 边界是第二天的 08:00
+	after := day(2026, time.September, 1, 9, 30)
+	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", after))
+}
+
+// 纯周次条件若带起止日期，也要在起止时刻产生边界
+func TestVersionBoundary_WeeklyWithDateBounds(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+
+	withFutureStart := weeklyCondition(2, 0)
+	withFutureStart.StartDate = "2026-09-20"
+	startRecord := recordWithCondition("week-start", dbTable.AutorunTypeTimetable, []string{"s"}, withFutureStart)
+	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{startRecord}, "s", "g", "c", now))
+
+	withEnd := weeklyCondition(2, 0)
+	withEnd.EndDate = "2026-09-30"
+	endRecord := recordWithCondition("week-end", dbTable.AutorunTypeTimetable, []string{"s"}, withEnd)
+	assert.Equal(t, day(2026, time.October, 1, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
+}
+
 func TestVersionBoundary_MultipleRecordsTakesEarliest(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 	soon := recordWithCondition("soon", dbTable.AutorunTypeTimetable, []string{"s"},
@@ -424,4 +471,54 @@ func TestApplyScheduleRulesCtx_SkipsDisabledTaskAndEntries(t *testing.T) {
 	ctx := RuleContext{Now: day(2026, time.September, 1, 8), TermStart: testTermStart}
 	resolved := ApplyScheduleRulesCtx(baseSchedule(), baseTimetable(), []dbTable.AutorunRecord{disabledTask, disabledEntry}, "s", "g", "c", ctx)
 	assert.Equal(t, "常日", resolved[2].Timetable, "停用任务被跳过，停用条目被跳过，仅启用条目生效")
+}
+
+// boundaryOf 用单条目的记录求版本边界，便于断言单个条件的行为
+func boundaryOf(when *dbTable.AutorunCondition, now time.Time) int64 {
+	record := recordWithCondition("boundary", dbTable.AutorunTypeTimetable, []string{"s"}, when)
+	return VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", now)
+}
+
+// 已过终点的范围条件永久不命中：不应再返回次日零点或下一次 cron 命中
+func TestVersionBoundary_ExpiredRangeHasNoBoundary(t *testing.T) {
+	now := day(2026, time.September, 15, 10)
+
+	plain := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-09-11"}
+	assert.Equal(t, int64(0), boundaryOf(plain, now), "过期的范围条件不会再变化")
+
+	weekday := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-09-11", Weekdays: []int{3}}
+	assert.Equal(t, int64(0), boundaryOf(weekday, now), "过期的范围条件不应返回范围外的星期零点")
+
+	cronWhen := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *", EndDate: "2026-09-11"}
+	assert.Equal(t, int64(0), boundaryOf(cronWhen, now), "过期的 cron 条件不应返回范围外的命中点")
+
+	// 终点当天仍生效，边界为终点次日零点；越过次日零点后为 0
+	active := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-09-11"}
+	assert.Equal(t, day(2026, time.September, 12, 0).Unix(), boundaryOf(active, day(2026, time.September, 11, 23)))
+	assert.Equal(t, int64(0), boundaryOf(active, day(2026, time.September, 12, 0)))
+}
+
+// 尚未开始的范围条件只返回起始边界，不返回范围外的星期零点或 cron 命中点
+func TestVersionBoundary_FutureRangeReturnsStartBoundaryOnly(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+
+	weekday := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-09-20", EndDate: "2026-09-30", Weekdays: []int{1}}
+	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), boundaryOf(weekday, now), "起点之前的星期零点不是变化点")
+
+	cronWhen := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *", StartDate: "2026-09-20", EndDate: "2026-09-30"}
+	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), boundaryOf(cronWhen, now), "起点之前的 cron 命中不是变化点")
+}
+
+// endDate 为空（不设终点）时行为不变
+func TestVersionBoundary_OpenEndedUnchanged(t *testing.T) {
+	now := day(2026, time.September, 1, 10)
+
+	plain := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01"}
+	assert.Equal(t, int64(0), boundaryOf(plain, now), "无终点的范围条件不产生边界")
+
+	weekday := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", Weekdays: []int{3}}
+	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), boundaryOf(weekday, now), "无终点时星期零点仍是边界")
+
+	cronWhen := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *"}
+	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), boundaryOf(cronWhen, now), "无终点时下一次命中仍是边界")
 }

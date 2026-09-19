@@ -75,6 +75,29 @@ func TestCronSpec_NextKeepsLaterHitInSameHour(t *testing.T) {
 	assert.Equal(t, time.Date(2026, time.September, 1, 8, 30, 0, 0, time.UTC), next)
 }
 
+// DST 切换日必须按本地墙钟取命中时刻：不能用 day.Add(绝对时长)，否则本地 08:00 会变成 07:00/09:00
+func TestCronSpec_DaylightSavingUsesWallClock(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("时区数据不可用，跳过 DST 用例")
+	}
+	spec, ok := ParseCron("0 8 * * *")
+	require.True(t, ok)
+
+	// 2026-03-08 是美国夏令时开始日（当地 02:00 跳到 03:00）
+	next, ok := spec.Next(time.Date(2026, time.March, 8, 0, 0, 0, 0, location))
+	require.True(t, ok)
+	assert.Equal(t, 8, next.Hour(), "命中时刻应为本地 08:00")
+	assert.Equal(t, 0, next.Minute())
+	assert.Equal(t, 8, next.Day())
+
+	// 2026-11-01 是夏令时结束日（当地 02:00 回到 01:00）
+	prev, ok := spec.Prev(time.Date(2026, time.November, 1, 12, 0, 0, 0, location))
+	require.True(t, ok)
+	assert.Equal(t, 8, prev.Hour(), "命中时刻应为本地 08:00")
+	assert.Equal(t, 0, prev.Minute())
+}
+
 func TestCronSpec_RareExpressionBeyondOneYear(t *testing.T) {
 	// 2 月 29 日：相邻两次命中可能相隔 4 年（甚至 8 年），搜索窗口必须覆盖
 	spec, ok := ParseCron("0 0 29 2 *")
@@ -98,4 +121,59 @@ func TestCronSpec_DayOfMonthOrWeekday(t *testing.T) {
 	assert.True(t, spec.match(time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)), "1 号命中")
 	assert.True(t, spec.match(time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC)), "周一命中")
 	assert.False(t, spec.match(time.Date(2026, time.September, 8, 0, 0, 0, 0, time.UTC)), "非 1 号且非周一不命中")
+}
+
+// 2026-03-08 是美国夏令时开始日（当地 02:00 直接跳到 03:00）：
+// 当天不存在的本地时刻按主流 cron 的「跳过」规则处理，当天不生效。
+func TestCronSpec_SkipsNonexistentLocalTimeOnDSTStart(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("时区数据不可用，跳过 DST 用例")
+	}
+	dstDay := time.Date(2026, time.March, 8, 0, 0, 0, 0, location)
+
+	missing, ok := ParseCron("30 2 * * *")
+	require.True(t, ok)
+
+	// 03-08 当天没有本地 02:30（time.Date 会把它规范化成 01:30）→ 跳过当天，命中落在次日
+	next, ok := missing.Next(dstDay)
+	require.True(t, ok)
+	assert.Equal(t, 9, next.Day(), "跳变当天不应产生 02:30 命中")
+	assert.Equal(t, 2, next.Hour())
+	assert.Equal(t, 30, next.Minute())
+
+	prev, ok := missing.Prev(time.Date(2026, time.March, 8, 12, 0, 0, 0, location))
+	require.True(t, ok)
+	assert.Equal(t, 7, prev.Day(), "跳变当天不应产生 02:30 命中")
+	assert.Equal(t, 2, prev.Hour())
+	assert.Equal(t, 30, prev.Minute())
+
+	// 当天的 03:30 真实存在，正常命中
+	existing, ok := ParseCron("30 3 * * *")
+	require.True(t, ok)
+	hit, ok := existing.Next(dstDay)
+	require.True(t, ok)
+	assert.Equal(t, 8, hit.Day())
+	assert.Equal(t, 3, hit.Hour())
+	assert.Equal(t, 30, hit.Minute())
+}
+
+// cronHitAt 只在时刻被 time.Date 规范化时报无效；秋季回拨日重复出现的时刻仍然有效
+func TestCronHitAt_ValidityMarker(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("时区数据不可用，跳过 DST 用例")
+	}
+	dstDay := time.Date(2026, time.March, 8, 0, 0, 0, 0, location)
+
+	_, ok := cronHitAt(dstDay, 2, 30)
+	require.False(t, ok, "不存在的本地 02:30 应判为无效")
+	_, ok = cronHitAt(dstDay, 3, 30)
+	require.True(t, ok, "存在的本地 03:30 应判为有效")
+
+	fallBack := time.Date(2026, time.November, 1, 0, 0, 0, 0, location)
+	hit, ok := cronHitAt(fallBack, 1, 30)
+	require.True(t, ok, "回拨日重复出现的 01:30 仍然有效")
+	assert.Equal(t, 1, hit.Hour())
+	assert.Equal(t, 30, hit.Minute())
 }

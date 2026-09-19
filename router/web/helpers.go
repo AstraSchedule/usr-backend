@@ -3,6 +3,7 @@ package web
 import (
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/router/client"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -41,6 +42,71 @@ func parseScopeInput(raw interface{}) []string {
 	default:
 		return []string{"ALL"}
 	}
+}
+
+// parseScopeInputStrict 解析写入用的 scope：格式非法时报错，绝不静默转成 ALL。
+// 旧版 parseScopeInput 会把对象、数字、空数组、混入非字符串的数组一律变成 []string{"ALL"}，
+// 于是「请求写错了」会变成「写出一条全站生效的规则」——这里必须显式拒绝。
+// 仅 raw == nil（字段缺省）保留 ALL 这一文档化的默认值。
+func parseScopeInputStrict(raw interface{}) ([]string, string) {
+	switch v := raw.(type) {
+	case nil:
+		return []string{"ALL"}, ""
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, "scope 不能为空字符串"
+		}
+		return []string{trimmed}, ""
+	case []string:
+		return normalizeScopeEntries(v)
+	case []interface{}:
+		list := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, "scope 只能由字符串组成"
+			}
+			list = append(list, s)
+		}
+		return normalizeScopeEntries(list)
+	default:
+		return nil, "scope 必须为字符串或字符串数组"
+	}
+}
+
+// scopeInput 解析自动任务的 scope 入参：
+//   - 字段缺省（未出现在请求体里）→ 默认 ALL；
+//   - 显式 null → 400：语义上「清空作用域」不应被当成「默认全部」，否则会静默写入全局作用域；
+//   - 其余情况交给 parseScopeInputStrict 校验。
+func scopeInput(raw json.RawMessage) ([]string, string) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return parseScopeInputStrict(nil)
+	}
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil, "scope 不能为 null"
+	}
+	var value interface{}
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return nil, "scope 必须为字符串或字符串数组"
+	}
+	return parseScopeInputStrict(value)
+}
+
+func normalizeScopeEntries(list []string) ([]string, string) {
+	if len(list) == 0 {
+		return nil, "scope 不能为空数组"
+	}
+	out := make([]string, 0, len(list))
+	for _, raw := range list {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return nil, "scope 不能包含空字符串"
+		}
+		out = append(out, trimmed)
+	}
+	return out, ""
 }
 
 func makeHashID(etype int, scope []string, level int, parameters map[string]interface{}) string {

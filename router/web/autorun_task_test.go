@@ -40,7 +40,11 @@ func weeklyEntry(id string, everyWeeks, offset int, timetableID string) map[stri
 func taskRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	router := setupTestRouter()
-	router.PUT("/web/autorun/task", adminOnly(t), PutAutorunTask)
+	// adminOnly 每次调用都会重建同名用户，多次调用会让先前注册路由上的 claims 变成失效用户（401），
+	// 因此这里只创建一次并复用同一份鉴权中间件
+	admin := adminOnly(t)
+	router.PUT("/web/autorun/task", admin, PutAutorunTask)
+	router.PUT("/web/autorun/timetable", admin, PutTimetableRule)
 	router.GET("/web/autorun/hash/:hashid", GetAutorunHashStatus)
 	router.GET("/web/autorun", GetAutorunStatus)
 	return router
@@ -170,6 +174,72 @@ func TestPutAutorunTask_InvalidPayloads(t *testing.T) {
 	}
 }
 
+// 格式错误的 scope 必须被拒绝，绝不能静默变成全站生效的 ALL 规则
+func TestPutAutorunTask_RejectsMalformedScope(t *testing.T) {
+	ensureTestDB()
+	router := taskRouter(t)
+
+	malformed := []struct {
+		name  string
+		scope interface{}
+	}{
+		{"对象", map[string]interface{}{"school": "s1"}},
+		{"数字", 123},
+		{"布尔", true},
+		{"空数组", []string{}},
+		{"空字符串", ""},
+		{"空字符串元素", []string{"s1", ""}},
+		{"混合类型数组", []interface{}{"s1", 5}},
+	}
+	for _, tc := range malformed {
+		t.Run(tc.name, func(t *testing.T) {
+			body := timetableTaskBody([]map[string]interface{}{weeklyEntry("e1", 2, 0, "exam")})
+			body["scope"] = tc.scope
+			w := doRequest(t, router, "PUT", "/web/autorun/task", body)
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
+
+	// 合法输入不受影响：数组、单字符串、以及字段缺省（沿用 ALL 默认值）
+	okBodies := []interface{}{
+		[]string{"s1/g1"},
+		"s1/g1",
+		nil,
+	}
+	for i, scope := range okBodies {
+		body := timetableTaskBody([]map[string]interface{}{weeklyEntry("e1", 2, 0, "exam")})
+		if scope == nil {
+			delete(body, "scope")
+		} else {
+			body["scope"] = scope
+		}
+		w := doRequest(t, router, "PUT", "/web/autorun/task", body)
+		assert.Equal(t, http.StatusOK, w.Code, "case %d: %s", i, w.Body.String())
+	}
+}
+
+// 旧版按类型写入接口同样不能把非法 scope 变成 ALL
+func TestPutCompensationRule_RejectsMalformedScope(t *testing.T) {
+	ensureTestDB()
+	router := setupTestRouter()
+	router.PUT("/web/autorun/compensation", adminOnly(t), PutCompensationRule)
+
+	before, err := db.FetchAutorunRecords("")
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"type": dbTable.AutorunTypeCompensation, "scope": map[string]interface{}{"oops": true}, "priority": 1,
+		"content": map[string]interface{}{"date": "2026-10-01", "useDate": "2026-09-29"},
+	}
+	w := doRequest(t, router, "PUT", "/web/autorun/compensation", body)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+	// 确认这次请求没有落下任何规则（尤其不能落下 ALL 级规则）
+	after, err := db.FetchAutorunRecords("")
+	require.NoError(t, err)
+	assert.Len(t, after, len(before), "非法 scope 不应写入任何记录")
+}
+
 func TestPutAutorunTask_ScheduleAndCompensation(t *testing.T) {
 	ensureTestDB()
 	router := taskRouter(t)
@@ -240,6 +310,42 @@ func TestPutAutorunTask_OpenEndedRange(t *testing.T) {
 	when := entries[0].(map[string]interface{})["when"].(map[string]interface{})
 	assert.Equal(t, "2026-09-07", when["startDate"])
 	assert.NotContains(t, when, "endDate")
+}
+
+// scope 契约：字段缺省默认 ALL，显式 null 视为非法（不能静默写成全局作用域）
+func TestPutAutorunTask_ScopeContract(t *testing.T) {
+	ensureTestDB()
+	router := taskRouter(t)
+
+	// 缺省：默认 ALL，写入成功
+	omitted := timetableTaskBody([]map[string]interface{}{weeklyEntry("scope-default", 2, 0, "exam")})
+	delete(omitted, "scope")
+	w := doRequest(t, router, "PUT", "/web/autorun/task", omitted)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, []interface{}{"ALL"}, fetchAutorunDetail(t, router, w)["scope"])
+
+	// 显式 null：400
+	for _, tc := range []struct {
+		name string
+		body map[string]interface{}
+	}{
+		{"v2 任务接口", timetableTaskBody([]map[string]interface{}{weeklyEntry("scope-null", 2, 0, "exam")})},
+		{"v1 作息表接口", map[string]interface{}{
+			"type": dbTable.AutorunTypeTimetable, "priority": 1,
+			"content": map[string]interface{}{"timetableId": "exam", "date": "2026-09-07"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.body["scope"] = nil
+			path := "/web/autorun/task"
+			if tc.name == "v1 作息表接口" {
+				path = "/web/autorun/timetable"
+			}
+			w := doRequest(t, router, "PUT", path, tc.body)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), "scope 不能为 null")
+		})
+	}
 }
 
 // 时刻事件只对客户端配置类型开放（课表类任务由服务端解析，无法判定节次时刻）
