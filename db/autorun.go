@@ -2,6 +2,7 @@ package db
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/service"
 	"time"
 
 	"gorm.io/gorm/clause"
@@ -29,6 +30,20 @@ func FetchAutorunRecordsNs(namespace, hashid string) ([]dbTable.AutorunRecord, e
 	return records, err
 }
 
+// FetchAutorunRecordNamespacesByHash 按 hash_id 跨 namespace 查询记录所属的命名空间。
+// 仅用于写入前的归属校验：主键是全局唯一的 hash_id，客户端若自带一个已属于其它租户的 ID，
+// Upsert(UpdateAll) 会连 Namespace 一起改写，必须在校验后拒绝。
+func FetchAutorunRecordNamespacesByHash(hashid string) ([]string, error) {
+	out := make([]string, 0)
+	if hashid == "" {
+		return out, nil
+	}
+	err := GetDB().Model(&dbTable.AutorunRecord{}).
+		Where(hashIDWhere, hashid).
+		Pluck("namespace", &out).Error
+	return out, err
+}
+
 // DeleteAutorunRecord 删除自动任务记录（无命名空间，向后兼容）
 func DeleteAutorunRecord(hashid string) (int64, error) {
 	return DeleteAutorunRecordNs("", hashid)
@@ -51,33 +66,13 @@ func UpsertAutorunRecord(record *dbTable.AutorunRecord) error {
 	}).Create(record).Error
 }
 
-func deriveStatusForRecord(etype int, parameters map[string]interface{}, today time.Time) int {
-	if etype < 0 || etype > 3 {
+// deriveStatusForRecord 推导任务状态：0 待生效 / 1 生效中 / 2 已过期。
+// v2 起按任务内所有条目的生效区间（并集）判定，v1 的单日规则退化为同一天内生效，结果不变。
+func deriveStatusForRecord(record dbTable.AutorunRecord, today time.Time) int {
+	if record.EType < dbTable.AutorunTypeCompensation || record.EType > dbTable.AutorunTypeClientConfig {
 		return 0
 	}
-	var rule map[string]interface{}
-	if rv, ok := parameters["rule"].(map[string]interface{}); ok {
-		rule = rv
-	} else {
-		rule = parameters
-	}
-	dateStr, _ := rule["date"].(string)
-	if dateStr == "" {
-		return 0
-	}
-	day, err := time.ParseInLocation("2006-01-02", dateStr, today.Location())
-	if err != nil {
-		return 0
-	}
-	todayDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
-	ruleDate := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
-	if todayDate.Before(ruleDate) {
-		return 0
-	}
-	if todayDate.Equal(ruleDate) {
-		return 1
-	}
-	return 2
+	return service.TaskStatus(record, today)
 }
 
 // RefreshAutorunStatuses 刷新自动任务状态（无命名空间，向后兼容）
@@ -93,7 +88,7 @@ func RefreshAutorunStatusesNs(namespace string, today time.Time) (int64, error) 
 	}
 	updated := int64(0)
 	for i := range records {
-		newStatus := deriveStatusForRecord(records[i].EType, records[i].Parameters, today)
+		newStatus := deriveStatusForRecord(records[i], today)
 		if newStatus == records[i].Status {
 			continue
 		}

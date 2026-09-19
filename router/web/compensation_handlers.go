@@ -105,7 +105,16 @@ func GetScheduleByDate(c *gin.Context) {
 	timetable := db.GetTimetableNs(ns, school, grade)
 	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
 	records, _ := db.FetchAutorunRecordsNs(ns, "")
-	resolved := service.ApplyScheduleRules(schedule.DailyClasses, timetable.Timetable, records, school, grade, classNumber, dateObj)
+	// 带上学期起始日：周期条件（未显式设置 startDate 时）按学期周次解析
+	resolved := service.ApplyScheduleRulesCtx(
+		schedule.DailyClasses,
+		timetable.Timetable,
+		records,
+		school,
+		grade,
+		classNumber,
+		service.RuleContext{Now: dateObj, TermStart: timetable.TimetableConfig.Start},
+	)
 	periods := service.BuildPeriodsForDate(resolved, timetable.Timetable, dateObj)
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"periods": periods}})
 }

@@ -5,6 +5,7 @@ import (
 	"AstraScheduleServerGo/router/client"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,6 +49,88 @@ func parseScopeInput(raw interface{}) []string {
 func makeHashID(ns string, etype int, scope []string, level int, parameters map[string]interface{}) string {
 	sum := sha256.Sum256([]byte(ns + "|" + strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + stableMapString(parameters)))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// parseScopeInputStrict 解析写入用的 scope：格式非法时报错，绝不静默转成 ALL。
+// 旧版 parseScopeInput 会把对象、数字、空数组、混入非字符串的数组一律变成 []string{"ALL"}，
+// 于是「请求写错了」会变成「写出一条全站生效的规则」——这里必须显式拒绝。
+// 仅 raw == nil（字段缺省）保留 ALL 这一文档化的默认值。
+func parseScopeInputStrict(raw interface{}) ([]string, string) {
+	switch v := raw.(type) {
+	case nil:
+		return []string{"ALL"}, ""
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, "scope 不能为空字符串"
+		}
+		return []string{trimmed}, ""
+	case []string:
+		return normalizeScopeEntries(v)
+	case []interface{}:
+		list := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, "scope 只能由字符串组成"
+			}
+			list = append(list, s)
+		}
+		return normalizeScopeEntries(list)
+	default:
+		return nil, "scope 必须为字符串或字符串数组"
+	}
+}
+
+func normalizeScopeEntries(list []string) ([]string, string) {
+	if len(list) == 0 {
+		return nil, "scope 不能为空数组"
+	}
+	out := make([]string, 0, len(list))
+	for _, raw := range list {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return nil, "scope 不能包含空字符串"
+		}
+		out = append(out, trimmed)
+	}
+	return out, ""
+}
+
+// makeTaskHashID 生成 v2 任务的稳定哈希 ID（命名空间 + 类型 + 优先级 + 作用域 + 名称 + 条目内容）。
+// 用 JSON 编码而不是手工拼接：JSON 对 map 键排序，且字段边界明确，
+// 不会出现 "a=b|c=d" 与 "a=b|c=d" 这类手工拼接导致的歧义碰撞。
+// 哈希输入必须包含 namespace：否则不同租户的相同任务会得到同一个 hash_id，
+// 而 Upsert 以 hash_id 为冲突键 + UpdateAll，会跨租户互相覆盖。
+func makeTaskHashID(ns string, etype int, scope []string, level int, name string, entries []dbTable.AutorunEntry) string {
+	payload := struct {
+		Namespace string                 `json:"namespace"`
+		Type      int                    `json:"type"`
+		Level     int                    `json:"level"`
+		Scope     []string               `json:"scope"`
+		Name      string                 `json:"name"`
+		Entries   []dbTable.AutorunEntry `json:"entries"`
+	}{
+		Namespace: ns,
+		Type:      etype,
+		Level:     level,
+		Scope:     sortedScope(scope),
+		Name:      name,
+		Entries:   entries,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// 条目内容均来自 JSON 请求体，理论上不会出错；退化为不含条目的哈希保证仍然稳定
+		raw = []byte(strconv.Itoa(etype) + "|" + strconv.Itoa(level) + "|" + stringsFromScope(scope) + "|" + name)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func sortedScope(scope []string) []string {
+	copyScope := append([]string(nil), scope...)
+	sort.Strings(copyScope)
+	return copyScope
 }
 
 func stringsFromScope(scope []string) string {
