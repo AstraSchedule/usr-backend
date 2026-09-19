@@ -69,7 +69,7 @@ func UpsertAutorunRecord(record *dbTable.AutorunRecord) error {
 // deriveStatusForRecord 推导任务状态：0 待生效 / 1 生效中 / 2 已过期。
 // v2 起按任务内所有条目的生效区间（并集）判定，v1 的单日规则退化为同一天内生效，结果不变。
 func deriveStatusForRecord(record dbTable.AutorunRecord, today time.Time) int {
-	if record.EType < dbTable.AutorunTypeCompensation || record.EType > dbTable.AutorunTypeClientConfig {
+	if record.EType < dbTable.AutorunTypeCompensation || record.EType > dbTable.AutorunTypeMax {
 		return 0
 	}
 	return service.TaskStatus(record, today)

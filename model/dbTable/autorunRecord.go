@@ -9,7 +9,11 @@ const (
 	AutorunTypeSchedule     = 2 // 课程表调整
 	AutorunTypeAll          = 3 // 全部调整
 	AutorunTypeClientConfig = 4 // 客户端配置（自动套用桌面端本地设置）
+	AutorunTypeLessonSwap   = 5 // 调课（两节具体的课互换，可跨天）
 )
+
+// AutorunTypeMax 当前最大的类型值，供范围校验与错误提示复用
+const AutorunTypeMax = AutorunTypeLessonSwap
 
 // 生效条件类型（AutorunCondition.Kind）
 const (
