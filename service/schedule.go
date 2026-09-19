@@ -11,6 +11,7 @@ import (
 type scheduleRuleCandidate struct {
 	Level int
 	Spec  int
+	Type  int
 	Rule  map[string]interface{}
 }
 
@@ -86,9 +87,22 @@ func sameDate(a, b time.Time) bool {
 // collectCandidates 收集指定类型下所有命中的条目。
 // 一条任务可以带多条条目，命中判定统一走 service 的条件引擎（MatchEntry）。
 func collectCandidates(records []dbTable.AutorunRecord, etype int, school, grade, classNumber string, ctx RuleContext) []scheduleRuleCandidate {
+	return collectCandidatesMulti(records, []int{etype}, school, grade, classNumber, ctx)
+}
+
+// collectCandidatesMulti 收集多个类型的命中条目，供「调课」与「课程表调整」同层竞合使用：
+// 两类条目按用户设置的优先级（Level）混排，同优先级时保持录入顺序。
+func collectCandidatesMulti(records []dbTable.AutorunRecord, etypes []int, school, grade, classNumber string, ctx RuleContext) []scheduleRuleCandidate {
+	wanted := make(map[int]struct{}, len(etypes))
+	for _, etype := range etypes {
+		wanted[etype] = struct{}{}
+	}
 	out := make([]scheduleRuleCandidate, 0)
 	for _, r := range records {
-		if r.EType != etype || r.Disabled {
+		if r.Disabled {
+			continue
+		}
+		if _, ok := wanted[r.EType]; !ok {
 			continue
 		}
 		spec := bestRowSpecificity(r.Scope, school, grade, classNumber)
@@ -102,6 +116,7 @@ func collectCandidates(records []dbTable.AutorunRecord, etype int, school, grade
 			out = append(out, scheduleRuleCandidate{
 				Level: r.Level,
 				Spec:  spec,
+				Type:  r.EType,
 				Rule:  entry.Action,
 			})
 		}
@@ -173,13 +188,108 @@ func applyPeriodsToDay(schedule *[7]dbTable.DailyClass, todayIdx int, rule map[s
 	schedule[todayIdx].ClassList = classList
 }
 
+// swapSide 调课的一端：某一天的某一节（节次从 1 开始）
+type swapSide struct {
+	Date   time.Time
+	Period int
+}
+
+// parseSwapSide 解析调课的一端，任一项非法时返回 false
+func parseSwapSide(raw interface{}) (swapSide, bool) {
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return swapSide{}, false
+	}
+	dateStr, _ := obj["date"].(string)
+	date, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+	if err != nil {
+		return swapSide{}, false
+	}
+	period, ok := asInt(obj["period"])
+	if !ok || period <= 0 {
+		return swapSide{}, false
+	}
+	return swapSide{Date: date, Period: period}, true
+}
+
+// swapSubjectAt 取某一天某一节当前解析后的科目（按该日期所在周解析每周轮换课表）
+func swapSubjectAt(day dbTable.DailyClass, period int, weekNumber int) (string, bool) {
+	subjects := ResolveClassList(day.ClassList, weekNumber)
+	if period < 1 || period > len(subjects) {
+		return "", false
+	}
+	return subjects[period-1], true
+}
+
+// setSubjectAt 覆盖某一天某一节的科目；节次越界时不做任何修改。
+// 写入前先复制一份 ClassList：resolved 与调用方传入的 base 共享底层数组，
+// 原地写入会污染调用方数据，导致同一份 base 的后续解析看到上一次的结果。
+func setSubjectAt(day *dbTable.DailyClass, period int, subject string) {
+	if period < 1 || period > len(day.ClassList) {
+		return
+	}
+	classList := make(dbTable.ClassList, len(day.ClassList))
+	copy(classList, day.ClassList)
+	classList[period-1] = []string{subject}
+	day.ClassList = classList
+}
+
+// swapPeriodsInDay 交换同一天内两节课的科目；同一节或节次越界时不做任何修改
+func swapPeriodsInDay(day *dbTable.DailyClass, first, second, weekNumber int) {
+	if first == second {
+		return
+	}
+	subjects := ResolveClassList(day.ClassList, weekNumber)
+	if first < 1 || second < 1 || first > len(subjects) || second > len(subjects) {
+		return
+	}
+	firstSubject, secondSubject := subjects[first-1], subjects[second-1]
+	setSubjectAt(day, first, secondSubject)
+	setSubjectAt(day, second, firstSubject)
+}
+
+// applySwapRule 应用一条调课：把两节具体的课互换。
+// 同一天内的互换直接交换两节；跨天互换时只改写「当前请求日期」这一端（与其它规则一致，
+// 另一端在它自己那天被请求时改写），对方科目按对方日期所在周解析，因此每周轮换课表也能取到正确科目。
+func applySwapRule(resolved *[7]dbTable.DailyClass, rule map[string]interface{}, ctx RuleContext) {
+	swapObj, ok := rule["swap"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	from, fromOK := parseSwapSide(swapObj["from"])
+	to, toOK := parseSwapSide(swapObj["to"])
+	if !fromOK || !toOK {
+		return
+	}
+	todayIdx := weekdayIndex(ctx.Now)
+	if sameDate(from.Date, to.Date) {
+		if !sameDate(ctx.Now, from.Date) {
+			return
+		}
+		swapPeriodsInDay(&resolved[todayIdx], from.Period, to.Period, CalcWeekNumber(ctx.TermStart, ctx.Now))
+		return
+	}
+	cur, other := from, to
+	if sameDate(ctx.Now, to.Date) {
+		cur, other = to, from
+	} else if !sameDate(ctx.Now, from.Date) {
+		return
+	}
+	subject, ok := swapSubjectAt(resolved[weekdayIndex(other.Date)], other.Period, CalcWeekNumber(ctx.TermStart, other.Date))
+	if !ok || subject == "" {
+		return
+	}
+	setSubjectAt(&resolved[todayIdx], cur.Period, subject)
+}
+
 // ApplyScheduleRules 兼容入口：只按日期匹配（无学期起始日，周期条件按第 1 周语义求值）。
 // 新调用方请使用 ApplyScheduleRulesCtx 以便传入学期起始日等上下文。
 func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, targetDate time.Time) [7]dbTable.DailyClass {
 	return ApplyScheduleRulesCtx(base, timetable, records, school, grade, classNumber, RuleContext{Now: targetDate})
 }
 
-// ApplyScheduleRulesCtx 按 COMPENSATION → TIMETABLE → SCHEDULE → ALL 的顺序叠加自动任务条目
+// ApplyScheduleRulesCtx 按 COMPENSATION → TIMETABLE → (SCHEDULE + 调课) → ALL 的顺序叠加自动任务条目。
+// 其中「调课」与「课程表调整」在同一层按优先级混排。
 func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
 	resolved := base
 	todayIdx := weekdayIndex(ctx.Now)
@@ -203,7 +313,13 @@ func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[
 		resolved[todayIdx].Timetable = timetableID
 	}
 
-	for _, c := range collectCandidates(records, 2, school, grade, classNumber, ctx) {
+	// 调课（互换两节具体的课）与课程表调整同层竞合：按用户设置的优先级 level 混排，
+	// 同优先级保持录入顺序，最后生效的条目胜出。
+	for _, c := range collectCandidatesMulti(records, []int{dbTable.AutorunTypeSchedule, dbTable.AutorunTypeLessonSwap}, school, grade, classNumber, ctx) {
+		if c.Type == dbTable.AutorunTypeLessonSwap {
+			applySwapRule(&resolved, c.Rule, ctx)
+			continue
+		}
 		applyPeriodsToDay(&resolved, todayIdx, c.Rule)
 	}
 

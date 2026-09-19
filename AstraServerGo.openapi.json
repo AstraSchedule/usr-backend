@@ -49,7 +49,7 @@
     "/{school}/{grade}/{class}": {
       "get": {
         "summary": "获取完整课表配置",
-        "description": "客户端通过 school/grade/class 获取完整配置（课表、作息、科目、通用设置、版本）。可选 `version` 参数实现增量更新（304 Not Modified）。",
+        "description": "客户端通过 school/grade/class 获取完整配置（课表、作息、科目、通用设置、版本）。可选 `version` 参数实现增量更新（304 Not Modified）。服务端在返回前叠加该班命中的自动任务（调休/作息表调整/课程表调整/调课/全部调整），其中调课会把当前请求日期这一端的科目换成另一端的科目。",
         "operationId": "getFullSchedule",
         "tags": ["client"],
         "parameters": [
@@ -1079,7 +1079,7 @@
     "/web/autorun/task": {
       "put": {
         "summary": "新增/更新自动任务（v2 统一接口）",
-        "description": "一个任务由任务级字段（名称/类型/生效域/优先级/启停）与若干条目组成；条目条件支持单日、日期范围、每 N 周、时刻事件与 cron。需要 JWT 认证（Authorization: Bearer），写操作还需通过 X-Verify-Password 请求头（或请求体 password 字段）校验密码；时刻事件条件仅客户端配置类型可用。",
+        "description": "一个任务由任务级字段（名称/类型/生效域/优先级/启停）与若干条目组成；条目条件支持单日、日期范围、每 N 周、时刻事件与 cron。需要 JWT 认证（Authorization: Bearer），写操作还需通过 X-Verify-Password 请求头（或请求体 password 字段）校验密码；时刻事件条件仅客户端配置类型可用。调课（type=5）与课程表调整在同一层按优先级（priority）竞合，同优先级时先录入的先生效。",
         "operationId": "putAutorunTask",
         "tags": ["web-autorun"],
         "parameters": [],
@@ -2646,7 +2646,7 @@
           "name": { "type": "string", "description": "任务名称" },
           "type": {
             "type": "string",
-            "description": "任务类型：COMPENSATION(0) | TIMETABLE(1) | SCHEDULE(2) | ALL(3) | CLIENT_CONFIG(4)"
+            "description": "任务类型：COMPENSATION(0) | TIMETABLE(1) | SCHEDULE(2) | ALL(3) | CLIENT_CONFIG(4) | LESSON_SWAP(5)"
           },
           "priority": { "type": "integer" },
           "status": {
@@ -2705,7 +2705,7 @@
           "action": {
             "type": "object",
             "additionalProperties": true,
-            "description": "条目内容（根据任务类型不同结构不同）"
+            "description": "条目内容，按任务类型区分：0 {useDate} | 1 {timetableId} | 2 {schedule:{periods:[{no,subject}]}} | 3 {timetableId,schedule} | 4 {settings:{isWindowAlwaysOnTop,isDuringClassHidden,isAlwaysMinimized,isDuringClassCountdown}} | 5 {swap:{from:{date,period},to:{date,period}}}（调课：period 从 1 开始，同一天的两端互换两节课，跨天时两端各自在自己那天生效）"
           },
           "content": {
             "type": "object",
@@ -2722,7 +2722,11 @@
           "enabled": { "type": "boolean", "description": "缺省为 true" },
           "note": { "type": "string" },
           "when": { "$ref": "#/components/schemas/AutorunCondition" },
-          "action": { "type": "object", "additionalProperties": true }
+          "action": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "条目内容，按任务类型区分：0 {useDate} | 1 {timetableId} | 2 {schedule:{periods:[{no,subject}]}} | 3 {timetableId,schedule} | 4 {settings:{isWindowAlwaysOnTop,isDuringClassHidden,isAlwaysMinimized,isDuringClassCountdown}} | 5 {swap:{from:{date,period},to:{date,period}}}（调课：period 从 1 开始，同一天的两端互换两节课，跨天时两端各自在自己那天生效）"
+          }
         }
       },
       "AutorunTaskPayload": {
@@ -2731,7 +2735,11 @@
         "properties": {
           "id": { "type": "string", "description": "可选；不传时按内容生成，编辑时传入以保持主键不变" },
           "name": { "type": "string", "description": "任务名称" },
-          "type": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "type": {
+            "type": "integer", "minimum": 0, "maximum": 5,
+            "description": "任务类型：0 调休 | 1 作息表调整 | 2 课程表调整 | 3 全部调整 | 4 客户端配置 | 5 调课（互换两节具体的课，可跨天）"
+          },
+
           "scope": { "$ref": "#/components/schemas/ScopeField" },
           "priority": { "type": "integer" },
           "enabled": { "type": "boolean", "description": "缺省为 true" },
