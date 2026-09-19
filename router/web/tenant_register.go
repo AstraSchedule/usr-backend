@@ -24,7 +24,13 @@ func RegisterTenant(c *gin.Context) {
 	namespace := "cn/getastra/" + claims.Subdomain
 
 	// 1. 创建管理员用户
-	hash, err := service.HashPassword(claims.Password)
+	password, ok := middleware.GetRegPassword(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "注册令牌未携带口令信息"})
+		return
+	}
+
+	hash, err := service.HashPassword(password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "密码哈希失败"})
 		return
