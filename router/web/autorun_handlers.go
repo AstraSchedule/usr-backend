@@ -5,6 +5,7 @@ import (
 	"AstraScheduleServerGo/middleware"
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/service"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -251,9 +252,9 @@ func saveAutorunRecord(c *gin.Context, record dbTable.AutorunRecord, oldScopes [
 	return true
 }
 
-// resolveAutorunScope 解析写入用的 scope；格式非法时写入 400 并返回 false
-func resolveAutorunScope(c *gin.Context, raw interface{}) ([]string, bool) {
-	scope, detail := parseScopeInputStrict(raw)
+// resolveAutorunScope 解析写入用的 scope；格式非法（含显式 null）时写入 400 并返回 false
+func resolveAutorunScope(c *gin.Context, raw json.RawMessage) ([]string, bool) {
+	scope, detail := scopeInput(raw)
 	if detail != "" {
 		badRequestInvalidArg(c, detail)
 		return nil, false
