@@ -3,6 +3,7 @@ package web
 import (
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/router/client"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -95,6 +96,25 @@ func normalizeScopeEntries(list []string) ([]string, string) {
 		out = append(out, trimmed)
 	}
 	return out, ""
+}
+
+// scopeInput 解析自动任务的 scope 入参：
+//   - 字段缺省（未出现在请求体里）→ 默认 ALL；
+//   - 显式 null → 400：语义上「清空作用域」不应被当成「默认全部」，否则会静默写入全局作用域；
+//   - 其余情况交给 parseScopeInputStrict 校验。
+func scopeInput(raw json.RawMessage) ([]string, string) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return parseScopeInputStrict(nil)
+	}
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil, "scope 不能为 null"
+	}
+	var value interface{}
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return nil, "scope 必须为字符串或字符串数组"
+	}
+	return parseScopeInputStrict(value)
 }
 
 // makeTaskHashID 生成 v2 任务的稳定哈希 ID（命名空间 + 类型 + 优先级 + 作用域 + 名称 + 条目内容）。

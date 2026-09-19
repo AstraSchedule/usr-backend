@@ -255,6 +255,7 @@ func VersionBoundary(records []dbTable.AutorunRecord, school, grade, classNumber
 // entryNextBoundary 计算条目下一次改变命中结果的时刻；0 表示不会再变化。
 // 需要覆盖 MatchCondition 里所有会让命中结果翻转的时点：日期上下界、限定星期的每日零点、
 // cron 命中点与带 duration 的窗口结束点。
+// 已过终点或尚未到起点时短路返回：前者永久不再命中，后者只有起点会改变命中结果。
 func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	when := e.When
 	if when == nil {
@@ -266,14 +267,18 @@ func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	now := ctx.Now
 	location := now.Location()
 	candidates := make([]time.Time, 0, 4)
-	// 生效区间上下界
+	// 生效区间起点：起点之前条件恒不命中，星期零点与 cron 命中都不会改变命中结果，
+	// 因此只返回起始边界，不返回范围外的候选点
 	if start, ok := parseConditionDate(when.StartDate, location); ok && now.Before(start) {
-		candidates = append(candidates, start)
+		return start.Unix()
 	}
+	// 生效区间终点：越过终点（含当天）后条件永久不命中，此后不会再产生变化点
 	if end, ok := parseConditionDate(when.EndDate, location); ok {
-		if endExclusive := end.AddDate(0, 0, 1); now.Before(endExclusive) {
-			candidates = append(candidates, endExclusive)
+		endExclusive := end.AddDate(0, 0, 1)
+		if !now.Before(endExclusive) {
+			return 0
 		}
+		candidates = append(candidates, endExclusive)
 	}
 	// 限定星期：命中集合每天零点切换一次
 	if len(when.Weekdays) > 0 {
