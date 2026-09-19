@@ -193,8 +193,14 @@ func (s cronSpec) Next(t time.Time) (time.Time, bool) {
 // cronHitAt 按「本地墙钟」构造命中时刻。
 // 不能用 day.Add(hour*time.Hour + minute*time.Minute)：那是加绝对时长，
 // 在 DST 切换日会把本地 08:00 算成 07:00 或 09:00，导致窗口与版本边界偏移。
-func cronHitAt(day time.Time, hour, minute int) time.Time {
-	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, day.Location())
+// 春季跳变当天不存在的本地时刻会被 time.Date 规范化到别的时刻（纽约 02:30 会变成 01:30），
+// 产品规则与主流 cron 一致取「跳过」：此时返回 false，由调用方忽略该候选。
+func cronHitAt(day time.Time, hour, minute int) (time.Time, bool) {
+	hit := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, day.Location())
+	if hit.Hour() != hour || hit.Minute() != minute {
+		return time.Time{}, false
+	}
+	return hit, true
 }
 
 func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
@@ -216,7 +222,10 @@ func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
 			if !s.minute.match(minute) {
 				continue
 			}
-			candidate := cronHitAt(day, hour, minute)
+			candidate, valid := cronHitAt(day, hour, minute)
+			if !valid {
+				continue // 该时刻当天不存在（DST 春季跳变），跳过
+			}
 			if !candidate.After(limit) {
 				return candidate, true
 			}
@@ -234,7 +243,10 @@ func (s cronSpec) firstHitOfDay(day, limit time.Time, strictlyAfterDay bool) (ti
 			if !s.minute.match(minute) {
 				continue
 			}
-			candidate := cronHitAt(day, hour, minute)
+			candidate, valid := cronHitAt(day, hour, minute)
+			if !valid {
+				continue // 该时刻当天不存在（DST 春季跳变），跳过
+			}
 			if strictlyAfterDay || candidate.After(limit) {
 				return candidate, true
 			}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,36 @@ func TestParseScopeInput_GoStringArray(t *testing.T) {
 	input := []string{"scope1", "scope2"}
 	result := parseScopeInput(input)
 	assert.Equal(t, []string{"scope1", "scope2"}, result)
+}
+
+// scopeInput 要区分「字段缺省」（默认 ALL）与「显式 null」（非法）
+func TestScopeInput(t *testing.T) {
+	cases := []struct {
+		name   string
+		raw    string
+		want   []string
+		detail string
+	}{
+		{"字段缺省", "", []string{"ALL"}, ""},
+		{"显式 null", "null", nil, "scope 不能为 null"},
+		{"字符串", "\"s/g/c\"", []string{"s/g/c"}, ""},
+		{"字符串数组", "[\"s/g\",\"s/g2\"]", []string{"s/g", "s/g2"}, ""},
+		{"空数组", "[]", nil, "scope 不能为空数组"},
+		{"空字符串", "\"\"", nil, "scope 不能为空字符串"},
+		{"类型非法", "123", nil, "scope 必须为字符串或字符串数组"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw json.RawMessage
+			if tc.raw != "" {
+				raw = json.RawMessage(tc.raw)
+			}
+			scope, detail := scopeInput(raw)
+			assert.Equal(t, tc.detail, detail)
+			assert.Equal(t, tc.want, scope)
+		})
+	}
 }
 
 func TestToString_Int(t *testing.T) {

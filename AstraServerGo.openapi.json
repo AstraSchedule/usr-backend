@@ -2672,7 +2672,7 @@
         }
       },
       "ScopeField": {
-        "description": "作用域字段，支持单个 scope 字符串（school/grade/class）或字符串数组，也可为空表示 ALL。",
+        "description": "作用域字段，支持单个 scope 字符串（school/grade/class）或字符串数组；字段缺省时默认为 ALL，显式 null 会被拒绝（400），避免把「清空作用域」静默写成全局规则。",
         "oneOf": [
           { "type": "string" },
           { "type": "array", "items": { "type": "string" } }
