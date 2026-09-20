@@ -1,5 +1,7 @@
 package dbTable
 
+import "time"
+
 type TimetableItem struct {
 	TimeRange string      `json:"time_range"`
 	Subject   interface{} `json:"subject"` // 可能是数字或字符串
@@ -17,4 +19,6 @@ type Timetable struct {
 	School    string `gorm:"uniqueIndex:idx_timetables_school_grade,priority:2;not null;size:50"`
 	Grade     string `gorm:"uniqueIndex:idx_timetables_school_grade,priority:3;not null;size:50"`
 	TimetableConfig
+	// 作息表按学校/年级存放，改动会影响该年级全部班级的响应，因此也参与版本计算
+	UpdatedAt time.Time `json:"updated_at"`
 }

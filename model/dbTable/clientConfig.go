@@ -1,5 +1,7 @@
 package dbTable
 
+import "time"
+
 type TemperatureStop struct {
 	Temp  float64 `json:"temp"`
 	Color string  `json:"color"`
@@ -28,4 +30,6 @@ type ClientConfig struct {
 	Grade     string `gorm:"uniqueIndex:idx_client_configs_school_grade_class,priority:3;not null;size:50"`
 	Class     string `gorm:"uniqueIndex:idx_client_configs_school_grade_class,priority:4;not null;size:50"`
 	ClientConfigItems
+	// 客户端配置按班级存放，改动会改变下发的配置内容，因此参与版本计算
+	UpdatedAt time.Time `json:"updated_at"`
 }

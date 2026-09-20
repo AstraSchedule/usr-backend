@@ -34,26 +34,49 @@ func GetSchedule(c *gin.Context) {
 		}
 	}
 	now := time.Now()
-	serverDataVersion := db.GetLatestVersionNs(ns, school, grade, class)
 	schedule := db.GetScheduleNs(ns, school, grade, class)
 	timetable := db.GetTimetableNs(ns, school, grade)
+	subject := db.GetSubjectNs(ns, school, grade)
+	clientConfig := db.GetClientConfigNs(ns, school, grade, class)
 	// 自动任务查询失败时宁可返回 500：否则会静默丢掉全部规则，把错误的课表当成正确结果下发
 	records, err := db.FetchAutorunRecordsNs(ns, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	classID := school + "/" + grade + "/" + class
+	// 与自动任务同理：查询失败宁可 500，否则会下发缺失倒数日的响应，
+	// 且倒数日时间戳不参与版本计算会让版本回退
+	allCountdowns, err := db.FetchCountdownRecordsNs(ns, "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	filteredCountdowns := service.FilterCountdownByScope(allCountdowns, classID)
+
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
 	// 单日/日期范围/cron 等条件可能在周内改变命中结果：把「下一次变化时刻」写进版本串，
 	// 变化之前 304 缓存照常生效，越过变化点后版本必然不同，客户端下一次请求即拿到新配置
 	boundary := service.VersionBoundary(records, school, grade, class, now)
-	effectiveVersion := scheduleVersion(serverDataVersion.Timestamp(), weekNumber, boundary)
-	if clientDataVersion == serverDataVersion.Timestamp() && clientWeekNumber == weekNumber && clientBoundary == boundary {
+	// 数据版本取作用域内所有会影响响应的时间戳的最大值，而不是只看 data_versions 行：
+	// 管理端保存课表/作息/科目/客户端配置、自动任务与倒数日规则的新增编辑都只写各自的表，
+	// 过去不推进版本，客户端重拉时命中 304、界面停留在旧配置（自动任务更是不写任何数据行，
+	// 只能靠记录自身的 UpdatedAt 参与版本）。
+	dataVersionTs := db.LatestTimestamp(
+		db.GetDataVersionNs(ns, school, grade, class).Version, // 显式版本：客户端 PUT 接口写入
+		schedule.UpdatedAt,
+		timetable.UpdatedAt,
+		subject.UpdatedAt,
+		clientConfig.UpdatedAt,
+		service.LatestApplicableRecordTimestamp(records, school, grade, class),
+		service.LatestCountdownTimestamp(filteredCountdowns),
+	)
+	effectiveVersion := scheduleVersion(dataVersionTs, weekNumber, boundary)
+	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber && clientBoundary == boundary {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
 	_, _ = db.RefreshAutorunStatusesNs(ns, now)
-	clientConfig := db.GetClientConfigNs(ns, school, grade, class)
 
 	// 如果数据库中没有 temperature_colors 配置或 stops 为空，使用默认值
 	if len(clientConfig.TemperatureColors.Stops) == 0 {
@@ -67,7 +90,6 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	subject := db.GetSubjectNs(ns, school, grade)
 	resolvedDailyClasses := service.ApplyScheduleRulesCtx(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
@@ -98,9 +120,7 @@ func GetSchedule(c *gin.Context) {
 	}
 
 	// 获取并过滤倒数日记录
-	classID := school + "/" + grade + "/" + class
-	allCountdowns, _ := db.FetchCountdownRecordsNs(ns, "")
-	filteredCountdowns := service.FilterCountdownByScope(allCountdowns, classID)
+	// 倒数日记录已在上方按作用域过滤
 
 	fullResponse := model.FullResponseConfig{
 		SupportWebsocket:  model.Configs.WebSocketEnabled(),
