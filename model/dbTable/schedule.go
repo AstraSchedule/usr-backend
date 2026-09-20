@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // ClassList 兼容旧版一维数组和新版二维数组格式
@@ -77,4 +78,7 @@ type Schedule struct {
 	Grade        string        `gorm:"uniqueIndex:idx_schedules_school_grade_class,priority:2;not null;size:50"`
 	Class        string        `gorm:"uniqueIndex:idx_schedules_school_grade_class,priority:3;not null;size:50"`
 	DailyClasses [7]DailyClass `gorm:"type:json;not null;serializer:json" json:"daily_class"`
+	// UpdatedAt 由 GORM 维护，并参与课表版本号计算：任何写入本行的路径都会推进版本，
+	// 客户端据此判断是否需要重新拉取，不再只依赖可能缺失的 data_versions 行
+	UpdatedAt time.Time `json:"updated_at"`
 }
