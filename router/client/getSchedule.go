@@ -72,6 +72,10 @@ func GetSchedule(c *gin.Context) {
 		service.LatestCountdownTimestamp(filteredCountdowns),
 	)
 	effectiveVersion := scheduleVersion(dataVersionTs, weekNumber, boundary)
+	// 边缘缓存（AstraSchedule/esa-edge-cache）靠这两个头判断能否不回源直接回 304。
+	// 304 与 200 两条路径都要带上：边缘回源命中源站 304 时，同样需要元信息来刷新自己的条目。
+	c.Header(cacheVersionHeader, effectiveVersion)
+	c.Header(cacheExpireHeader, strconv.FormatInt(scheduleExpireAt(boundary, now), 10))
 	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber && clientBoundary == boundary {
 		c.Status(http.StatusNotModified) // 304
 		return
@@ -168,6 +172,31 @@ func GetSchedule(c *gin.Context) {
 		"client_config_rules": clientConfigRules,
 	}
 	c.JSON(http.StatusOK, fullResponseMap)
+}
+
+const (
+	// cacheVersionHeader / cacheExpireHeader 是给 ESA 边缘函数（AstraSchedule/esa-edge-cache）用的
+	// 纯增量约定：不改变响应体结构，客户端不需要理解，边缘拿不到时退化为直接回源。
+	cacheVersionHeader = "X-Astra-Schedule-Version"
+	cacheExpireHeader  = "X-Astra-Schedule-Expire"
+)
+
+// scheduleExpireAt 返回该课表响应下一次必然失效的绝对时刻（Unix 秒），供边缘缓存判断
+// 手上的版本元信息还能不能用来回 304。
+//
+// 响应内容除了随数据版本变化，还随时间变化，所以取两者的较早值：
+//   - boundary：自动任务（单日/日期范围/cron）条件翻转的时刻；
+//   - 下一个本地零点：跨天后星期不同，daily_class 是按「今天」应用规则后展开的；
+//     周次与多周轮换课表也在周一变化，而周一同样是零点。
+//
+// 少了零点这一项，边缘会在午夜之后继续用前一天的版本判定 304，客户端整天拿不到新课表。
+func scheduleExpireAt(boundary int64, now time.Time) int64 {
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
+	expire := midnight.Unix()
+	if boundary > now.Unix() && boundary < expire {
+		expire = boundary
+	}
+	return expire
 }
 
 // scheduleVersion 生成客户端缓存版本：dataVersion:weekNumber[:boundary]
