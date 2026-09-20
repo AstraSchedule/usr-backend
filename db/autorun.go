@@ -52,9 +52,12 @@ func RefreshAutorunStatuses(today time.Time) (int64, error) {
 		if newStatus == records[i].Status {
 			continue
 		}
+		// status 只是给管理端列表展示的派生缓存，客户端响应由读取时按时间重新求值，
+		// 不依赖该列；因此这里用 UpdateColumn 跳过时间戳维护——否则每次状态翻转都会推进
+		// 自动任务记录的 UpdatedAt，进而推进课表版本，造成一次无意义的重新拉取
 		if err := GetDB().Model(&dbTable.AutorunRecord{}).
 			Where(hashIDWhere, records[i].HashID).
-			Update("status", newStatus).Error; err != nil {
+			UpdateColumn("status", newStatus).Error; err != nil {
 			return updated, err
 		}
 		updated++

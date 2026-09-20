@@ -1,5 +1,7 @@
 package dbTable
 
+import "time"
+
 type SubjectConfig struct {
 	SubjectName map[string]string `json:"subject_name" gorm:"type:json;not null;serializer:json"`
 }
@@ -9,4 +11,6 @@ type Subject struct {
 	School string `gorm:"uniqueIndex:idx_subjects_school_grade,priority:1;not null;size:50"`
 	Grade  string `gorm:"uniqueIndex:idx_subjects_school_grade,priority:2;not null;size:50"`
 	SubjectConfig
+	// 科目表按学校/年级存放，改动会影响该年级全部班级的响应，因此也参与版本计算
+	UpdatedAt time.Time `json:"updated_at"`
 }
