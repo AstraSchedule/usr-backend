@@ -43,7 +43,13 @@ func GetSchedule(c *gin.Context) {
 		return
 	}
 	classID := school + "/" + grade + "/" + class
-	allCountdowns, _ := db.FetchCountdownRecords("")
+	// 与自动任务同理：查询失败宁可 500，否则会下发缺失倒数日的响应，
+	// 且倒数日时间戳不参与版本计算会让版本回退
+	allCountdowns, err := db.FetchCountdownRecords("")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	filteredCountdowns := service.FilterCountdownByScope(allCountdowns, classID)
 
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
