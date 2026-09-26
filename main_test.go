@@ -659,9 +659,10 @@ func TestRouteTable_RequestTriggersAutorunCleanup(t *testing.T) {
 	// 任意请求即可：清理中间件在认证之前执行，因此匿名请求也会触发
 	contractRequest(t, router, http.MethodGet, "/web/menu", nil, nil)
 
+	// 只盯自己造的那条：库里可能还有其它用例留下的任务，断言整表为空会误报
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		rows, err := db.FetchAutorunRecords("")
+		rows, err := db.FetchAutorunRecords(expired.HashID)
 		require.NoError(t, err)
 		if len(rows) == 0 {
 			return
