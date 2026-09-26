@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func normalizeCountdownSchedules(items []countdownScheduleInput) []dbTable.CountdownScheduleItem {
@@ -206,7 +207,9 @@ func DeleteCountdownRecord(c *gin.Context) {
 	if rows, err := db.FetchCountdownRecordsNs(ns, id); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	affected, err := db.DeleteCountdownRecordNs(ns, id)
+	affected, err := deleteWithVersionBump(ns, scopes, func(tx *gorm.DB) (int64, error) {
+		return db.DeleteCountdownRecordNsTx(tx, ns, id)
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

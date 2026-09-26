@@ -64,6 +64,7 @@ func GetSchedule(c *gin.Context) {
 	// 只能靠记录自身的 UpdatedAt 参与版本）。
 	dataVersionTs := db.LatestTimestamp(
 		db.GetDataVersionNs(ns, school, grade, class).Version, // 显式版本：客户端 PUT 接口写入
+		db.GetDataVersionNs(ns, "", "", "").Version,           // 全局版本：删除类操作的兜底推进
 		schedule.UpdatedAt,
 		timetable.UpdatedAt,
 		subject.UpdatedAt,

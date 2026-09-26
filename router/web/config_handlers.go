@@ -16,30 +16,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// sortedTimetableKeys 返回排序后的作息表名称列表，"常日" 始终排在首位
-func sortedTimetableKeys(timetable map[string]map[string]interface{}) []string {
-	keys := make([]string, 0, len(timetable))
-	for name := range timetable {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	for i, k := range keys {
-		if k == "常日" {
-			keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
-			break
-		}
-	}
-	return keys
-}
-
-func respondCopyError(c *gin.Context, err error, resource string) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源" + resource})
-		return
-	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-}
-
 func syncTimetableDividerKeys(cfg *dbTable.TimetableConfig) {
 	if cfg.Divider == nil {
 		cfg.Divider = map[string][]int{}
@@ -139,49 +115,23 @@ func GetSubjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"abbr": abbr, "fullName": fullName})
 }
 
-// parseTextItems 从 JSON 数组中提取文本项
-func parseTextItems(arr []interface{}) []textItem {
-	var items []textItem
+// parseTextItems 从请求体里的数组抽取 text 字段（非对象或非字符串的项跳过）
+func parseTextItems(raw interface{}) []textItem {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	items := make([]textItem, 0, len(arr))
 	for _, item := range arr {
 		obj, ok := item.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		text, ok := obj["text"].(string)
-		if !ok {
-			continue
+		if text, ok := obj["text"].(string); ok {
+			items = append(items, textItem{Text: text})
 		}
-		items = append(items, textItem{Text: text})
 	}
 	return items
-}
-
-func parseSubjectsPayload(raw map[string]interface{}) subjectsPayload {
-	bodyMap := raw
-	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
-		bodyMap = modelVal
-	}
-
-	body := subjectsPayload{}
-	if arr, ok := bodyMap["abbr"].([]interface{}); ok {
-		body.Abbr = parseTextItems(arr)
-	}
-	if arr, ok := bodyMap["fullName"].([]interface{}); ok {
-		body.FullName = parseTextItems(arr)
-	}
-	return body
-}
-
-func subjectsNameMap(body subjectsPayload) map[string]string {
-	m := map[string]string{}
-	limit := len(body.Abbr)
-	if len(body.FullName) < limit {
-		limit = len(body.FullName)
-	}
-	for i := 0; i < limit; i++ {
-		m[body.Abbr[i].Text] = body.FullName[i].Text
-	}
-	return m
 }
 
 func PutSubjects(c *gin.Context) {
@@ -193,14 +143,60 @@ func PutSubjects(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	m := subjectsNameMap(parseSubjectsPayload(raw))
+	bodyMap := raw
+	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
+		bodyMap = modelVal
+	}
+	body := subjectsPayload{
+		Abbr:     parseTextItems(bodyMap["abbr"]),
+		FullName: parseTextItems(bodyMap["fullName"]),
+	}
+	m := map[string]string{}
+	limit := len(body.Abbr)
+	if len(body.FullName) < limit {
+		limit = len(body.FullName)
+	}
+	for i := 0; i < limit; i++ {
+		m[body.Abbr[i].Text] = body.FullName[i].Text
+	}
 	record := dbTable.Subject{Namespace: ns, School: school, Grade: grade, SubjectConfig: dbTable.SubjectConfig{SubjectName: m}}
 	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	client.BroadcastSync(ns, school, grade)
+	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
+}
+
+// sortedTimetableNames 返回作息名（字典序），并把「常日」置于首位
+func sortedTimetableNames(table map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(table))
+	for name := range table {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if k == "常日" {
+			return append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
+		}
+	}
+	return keys
+}
+
+// timetablePeriodCount 该作息需要的课节数（值里的最大下标 + 1）
+func timetablePeriodCount(config map[string]interface{}) int {
+	need := 0
+	for _, v := range config {
+		i, ok := serviceAsInt(v)
+		if !ok {
+			continue
+		}
+		if i+1 > need {
+			need = i + 1
+		}
+	}
+	return need
 }
 
 func GetTimetableOptions(c *gin.Context) {
@@ -208,22 +204,10 @@ func GetTimetableOptions(c *gin.Context) {
 	school := c.Param("school")
 	grade := c.Param("grade")
 	timetable := db.GetTimetableNs(ns, school, grade)
-	options := make([]gin.H, 0)
-	keys := sortedTimetableKeys(timetable.Timetable)
-
+	keys := sortedTimetableNames(timetable.Timetable)
+	options := make([]gin.H, 0, len(keys))
 	for _, name := range keys {
-		config := timetable.Timetable[name]
-		need := 0
-		for _, v := range config {
-			i, ok := serviceAsInt(v)
-			if !ok {
-				continue
-			}
-			if i+1 > need {
-				need = i + 1
-			}
-		}
-		options = append(options, gin.H{"label": name, "value": name, "need": need})
+		options = append(options, gin.H{"label": name, "value": name, "need": timetablePeriodCount(timetable.Timetable[name])})
 	}
 	c.JSON(http.StatusOK, gin.H{"options": options})
 }
@@ -250,7 +234,7 @@ func PutTimetable(c *gin.Context) {
 		return
 	}
 	if _, ok := body.Timetable["常日"]; !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不允许删除\"常日\"作息表，且必须包含\"常日\""})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不允许删除“常日”作息表，且必须包含“常日”"})
 		return
 	}
 	syncTimetableDividerKeys(&body)
@@ -260,125 +244,18 @@ func PutTimetable(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(ns, school, grade)
+	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
-// validateCopyPayload 校验复制请求参数，返回 from/to class 和错误
-func validateCopyPayload(payload *copyConfigPayload) (fromClass, toClass string, err *handlerError) {
-	fromClass = payload.From.ClassValue()
-	toClass = payload.To.ClassValue()
-	if payload.From.School == "" || payload.From.Grade == "" || fromClass == "" ||
-		payload.To.School == "" || payload.To.Grade == "" || toClass == "" {
-		return "", "", &handlerError{http.StatusBadRequest, "from/to 的 school、grade、class 均不能为空"}
-	}
-	if payload.From.School == payload.To.School && payload.From.Grade == payload.To.Grade && fromClass == toClass {
-		return "", "", &handlerError{http.StatusBadRequest, "来源与目标完全一致，无需复制"}
-	}
-	return fromClass, toClass, nil
-}
-
-type copySourceConfig struct {
-	Subject   dbTable.Subject
-	Timetable dbTable.Timetable
-	Schedule  dbTable.Schedule
-	Settings  dbTable.ClientConfig
-}
-
-type copyTargetConfig struct {
-	Subject   dbTable.Subject
-	Timetable dbTable.Timetable
-	Schedule  dbTable.Schedule
-	Settings  dbTable.ClientConfig
-}
-
-func loadCopySourceConfig(c *gin.Context, dbConn *gorm.DB, ns string, payload copyConfigPayload, fromClass string) (copySourceConfig, bool) {
-	var src copySourceConfig
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&src.Subject).Error; err != nil {
-		respondCopyError(c, err, "科目配置")
-		return src, false
-	}
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ?", ns, payload.From.School, payload.From.Grade).Take(&src.Timetable).Error; err != nil {
-		respondCopyError(c, err, "作息配置")
-		return src, false
-	}
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&src.Schedule).Error; err != nil {
-		respondCopyError(c, err, "课程表配置")
-		return src, false
-	}
-	if err := dbConn.Where("namespace = ? AND school = ? AND grade = ? AND class = ?", ns, payload.From.School, payload.From.Grade, fromClass).Take(&src.Settings).Error; err != nil {
-		respondCopyError(c, err, "通用设置配置")
-		return src, false
-	}
-	return src, true
-}
-
-func buildCopyTargetConfig(ns string, payload copyConfigPayload, toClass string, src copySourceConfig) copyTargetConfig {
-	targetTimetable := dbTable.Timetable{
-		Namespace: ns,
-		School:    payload.To.School,
-		Grade:     payload.To.Grade,
-		TimetableConfig: dbTable.TimetableConfig{
-			Start:     src.Timetable.Start,
-			Timetable: cloneTimetableMap(src.Timetable.Timetable),
-			Divider:   cloneDividerMap(src.Timetable.Divider),
-		},
-	}
-	syncTimetableDividerKeys(&targetTimetable.TimetableConfig)
-
-	return copyTargetConfig{
-		Subject: dbTable.Subject{
-			Namespace: ns,
-			School:    payload.To.School,
-			Grade:     payload.To.Grade,
-			SubjectConfig: dbTable.SubjectConfig{
-				SubjectName: cloneStringMap(src.Subject.SubjectName),
-			},
-		},
-		Timetable: targetTimetable,
-		Schedule: dbTable.Schedule{
-			Namespace:    ns,
-			School:       payload.To.School,
-			Grade:        payload.To.Grade,
-			Class:        toClass,
-			DailyClasses: cloneDailyClasses(src.Schedule.DailyClasses),
-		},
-		Settings: dbTable.ClientConfig{
-			Namespace: ns,
-			School:    payload.To.School,
-			Grade:     payload.To.Grade,
-			Class:     toClass,
-			ClientConfigItems: dbTable.ClientConfigItems{
-				CountdownTarget:      src.Settings.CountdownTarget,
-				WeatherAlertOverride: src.Settings.WeatherAlertOverride,
-				WeatherAlertBrief:    src.Settings.WeatherAlertBrief,
-				WeekDisplay:          src.Settings.WeekDisplay,
-				BannerText:           src.Settings.BannerText,
-				CSSStyle:             cloneStringMap(src.Settings.CSSStyle),
-				TemperatureColors:    src.Settings.TemperatureColors,
-				StartupBehavior:      src.Settings.StartupBehavior,
-			},
-		},
-	}
-}
-
-func saveCopyTargetConfig(c *gin.Context, tx *gorm.DB, target copyTargetConfig) bool {
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&target.Subject).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return false
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&target.Timetable).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return false
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&target.Schedule).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return false
-	}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&target.Settings).Error; err != nil {
-		tx.Rollback()
+// loadForCopy 读取复制来源的配置：找不到与查询失败都直接写好响应，返回 false 时调用方 return。
+// 四处来源（科目 / 作息 / 课表 / 通用设置）的读取与错误处理完全同构，抽出来避免重复。
+func loadForCopy(c *gin.Context, conn *gorm.DB, dest interface{}, where string, missing string, args ...interface{}) bool {
+	if err := conn.Where(where, args...).Take(dest).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"detail": missing})
+			return false
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return false
 	}
@@ -393,15 +270,15 @@ func CopyConfig(c *gin.Context) {
 		return
 	}
 
-	fromClass, toClass, verr := validateCopyPayload(&payload)
-	if verr != nil {
-		c.JSON(verr.status, gin.H{"detail": verr.msg})
+	fromClass := payload.From.ClassValue()
+	toClass := payload.To.ClassValue()
+	if payload.From.School == "" || payload.From.Grade == "" || fromClass == "" ||
+		payload.To.School == "" || payload.To.Grade == "" || toClass == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "from/to 的 school、grade、class 均不能为空"})
 		return
 	}
-
-	// 作用域校验：来源与目标都必须在用户权限范围内（非 admin 按数据库当前作用域判定）
-	if !middleware.CheckUserScope(c, payload.From.School, payload.From.Grade, fromClass) ||
-		!middleware.CheckUserScope(c, payload.To.School, payload.To.Grade, toClass) {
+	if payload.From.School == payload.To.School && payload.From.Grade == payload.To.Grade && fromClass == toClass {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "来源与目标完全一致，无需复制"})
 		return
 	}
 
@@ -412,11 +289,68 @@ func CopyConfig(c *gin.Context) {
 	}
 
 	dbConn := db.GetDB()
-	src, ok := loadCopySourceConfig(c, dbConn, ns, payload, fromClass)
-	if !ok {
+
+	var srcSubject dbTable.Subject
+	if !loadForCopy(c, dbConn, &srcSubject, "school = ? AND grade = ?", "未找到来源科目配置", payload.From.School, payload.From.Grade) {
 		return
 	}
-	target := buildCopyTargetConfig(ns, payload, toClass, src)
+
+	var srcTimetable dbTable.Timetable
+	if !loadForCopy(c, dbConn, &srcTimetable, "school = ? AND grade = ?", "未找到来源作息配置", payload.From.School, payload.From.Grade) {
+		return
+	}
+
+	var srcSchedule dbTable.Schedule
+	if !loadForCopy(c, dbConn, &srcSchedule, "school = ? AND grade = ? AND class = ?", "未找到来源课程表配置", payload.From.School, payload.From.Grade, fromClass) {
+		return
+	}
+
+	var srcSettings dbTable.ClientConfig
+	if !loadForCopy(c, dbConn, &srcSettings, "school = ? AND grade = ? AND class = ?", "未找到来源通用设置配置", payload.From.School, payload.From.Grade, fromClass) {
+		return
+	}
+
+	targetSubject := dbTable.Subject{
+		School: payload.To.School,
+		Grade:  payload.To.Grade,
+		SubjectConfig: dbTable.SubjectConfig{
+			SubjectName: cloneStringMap(srcSubject.SubjectName),
+		},
+	}
+
+	targetTimetable := dbTable.Timetable{
+		School: payload.To.School,
+		Grade:  payload.To.Grade,
+		TimetableConfig: dbTable.TimetableConfig{
+			Start:     srcTimetable.Start,
+			Timetable: cloneTimetableMap(srcTimetable.Timetable),
+			Divider:   cloneDividerMap(srcTimetable.Divider),
+		},
+	}
+	syncTimetableDividerKeys(&targetTimetable.TimetableConfig)
+
+	targetSchedule := dbTable.Schedule{
+		School:       payload.To.School,
+		Grade:        payload.To.Grade,
+		Class:        toClass,
+		DailyClasses: cloneDailyClasses(srcSchedule.DailyClasses),
+	}
+
+	targetSettings := dbTable.ClientConfig{
+		School: payload.To.School,
+		Grade:  payload.To.Grade,
+		Class:  toClass,
+		ClientConfigItems: dbTable.ClientConfigItems{
+			CountdownTarget:      srcSettings.CountdownTarget,
+			WeatherAlertOverride: srcSettings.WeatherAlertOverride,
+			WeatherAlertBrief:    srcSettings.WeatherAlertBrief,
+			WeekDisplay:          srcSettings.WeekDisplay,
+			BannerText:           srcSettings.BannerText,
+			CSSStyle:             cloneStringMap(srcSettings.CSSStyle),
+			TemperatureColors:    srcSettings.TemperatureColors,
+			StartupBehavior:      srcSettings.StartupBehavior,
+		},
+	}
 
 	tx := dbConn.Begin()
 	if tx.Error != nil {
@@ -429,7 +363,24 @@ func CopyConfig(c *gin.Context) {
 		}
 	}()
 
-	if !saveCopyTargetConfig(c, tx, target) {
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetSubject).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}}, UpdateAll: true}).Create(&targetTimetable).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSchedule).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&targetSettings).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -440,6 +391,7 @@ func CopyConfig(c *gin.Context) {
 
 	// 复制后通知目标班级所在年级的在线客户端刷新（来源班级数据未变，无需广播）
 	client.BroadcastSync(ns, payload.To.School, payload.To.Grade)
+	setPurgeScopes(c, []string{purgeScope(payload.To.School, payload.To.Grade, toClass)})
 	c.JSON(http.StatusOK, gin.H{
 		"status": 200,
 		"from": gin.H{
@@ -455,7 +407,13 @@ func CopyConfig(c *gin.Context) {
 	})
 }
 
-func maxTimetableSubjects(timetable dbTable.TimetableConfig) int {
+func GetScheduleConfig(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
+	school := c.Param("school")
+	grade := c.Param("grade")
+	classNumber := c.Param("class_number")
+	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
+	timetable := db.GetTimetableNs(ns, school, grade)
 	maxSubjects := 0
 	for _, v := range timetable.Timetable {
 		for _, item := range v {
@@ -465,90 +423,95 @@ func maxTimetableSubjects(timetable dbTable.TimetableConfig) int {
 			}
 		}
 	}
-	return maxSubjects
-}
-
-func scheduleDayResponse(day dbTable.DailyClass, timetable dbTable.TimetableConfig, maxSubjects int) gin.H {
-	if _, ok := timetable.Timetable[day.Timetable]; !ok {
-		day.Timetable = "常日"
-	}
-	classList := make([][]string, 0, len(day.ClassList))
-	for _, s := range day.ClassList {
-		classList = append(classList, s)
-	}
-	for len(classList) < maxSubjects {
-		classList = append(classList, []string{"课"})
-	}
-	return gin.H{
-		"Chinese":   day.Chinese,
-		"English":   day.English,
-		"classList": classList,
-		"timetable": day.Timetable,
-	}
-}
-
-func GetScheduleConfig(c *gin.Context) {
-	ns := middleware.GetNamespace(c)
-	school := c.Param("school")
-	grade := c.Param("grade")
-	classNumber := c.Param("class_number")
-	schedule := db.GetScheduleNs(ns, school, grade, classNumber)
-	timetable := db.GetTimetableNs(ns, school, grade)
-	maxSubjects := maxTimetableSubjects(timetable.TimetableConfig)
 	out := make([]gin.H, 0, 7)
 	for i := 0; i < 7; i++ {
-		out = append(out, scheduleDayResponse(schedule.DailyClasses[i], timetable.TimetableConfig, maxSubjects))
+		day := schedule.DailyClasses[i]
+		if _, ok := timetable.Timetable[day.Timetable]; !ok {
+			day.Timetable = "常日"
+		}
+		classList := make([][]string, 0, len(day.ClassList))
+		for _, s := range day.ClassList {
+			// 直接使用数据库格式 [["物"], ["数"]] 或 [["物", "化"], ["数"]]
+			classList = append(classList, s)
+		}
+		for len(classList) < maxSubjects {
+			classList = append(classList, []string{"课"})
+		}
+		out = append(out, gin.H{
+			"Chinese":   day.Chinese,
+			"English":   day.English,
+			"classList": classList,
+			"timetable": day.Timetable,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"daily_class": out})
 }
 
-// parseClassListRaw 从嵌套的 interface{} 中解析 classList
-func parseClassListRaw(raw interface{}) [][]string {
-	arr, ok := raw.([]interface{})
+// parseDailyClass 解析单日课表的输入；每日入口必须为对象，否则该天会被写成零值
+func parseDailyClass(index int, raw interface{}) (dailyClassInput, error) {
+	obj, ok := raw.(map[string]interface{})
 	if !ok {
-		return nil
+		return dailyClassInput{}, fmt.Errorf("daily_class[%d] 必须为对象", index)
 	}
-	var result [][]string
-	for _, classItem := range arr {
-		arr2, ok := classItem.([]interface{})
-		if !ok {
-			continue
-		}
-		line := make([]string, 0, len(arr2))
-		for _, x := range arr2 {
-			if s, ok := x.(string); ok {
-				line = append(line, s)
+	item := dailyClassInput{}
+	item.Chinese, _ = obj["Chinese"].(string)
+	item.English, _ = obj["English"].(string)
+	item.Timetable, _ = obj["timetable"].(string)
+	if classListRaw, ok := obj["classList"].([]interface{}); ok {
+		for _, classItem := range classListRaw {
+			arr, ok := classItem.([]interface{})
+			if !ok {
+				continue
 			}
+			line := make([]string, 0, len(arr))
+			for _, x := range arr {
+				if s, ok := x.(string); ok {
+					line = append(line, s)
+				}
+			}
+			item.ClassList = append(item.ClassList, line)
 		}
-		result = append(result, line)
 	}
-	return result
+	return item, nil
 }
 
-// parseSchedulePayload 从原始 JSON 中解析课表请求体
-func parseSchedulePayload(raw map[string]interface{}) schedulePayload {
+// parseSchedulePayloadStrict 解析保存课表的请求体：必须是完整的 7 天数组，
+// 否则会导致对应日期被静默清空（防坏请求覆盖既有数据）。
+func parseSchedulePayloadStrict(raw map[string]interface{}) (schedulePayload, error) {
 	bodyMap := raw
 	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
 		bodyMap = modelVal
 	}
-	body := schedulePayload{}
-	arr, ok := bodyMap["daily_class"].([]interface{})
+	dailyClassRaw, ok := bodyMap["daily_class"].([]interface{})
 	if !ok {
-		return body
+		return schedulePayload{}, fmt.Errorf("daily_class 必须为数组")
 	}
-	for _, one := range arr {
-		obj, ok := one.(map[string]interface{})
-		if !ok {
-			continue
+	if len(dailyClassRaw) != 7 {
+		return schedulePayload{}, fmt.Errorf("daily_class 必须包含 7 天（日一二三四五六）")
+	}
+	body := schedulePayload{}
+	for index, one := range dailyClassRaw {
+		item, err := parseDailyClass(index, one)
+		if err != nil {
+			return schedulePayload{}, err
 		}
-		item := dailyClassInput{}
-		item.Chinese, _ = obj["Chinese"].(string)
-		item.English, _ = obj["English"].(string)
-		item.Timetable, _ = obj["timetable"].(string)
-		item.ClassList = parseClassListRaw(obj["classList"])
 		body.DailyClass = append(body.DailyClass, item)
 	}
-	return body
+	return body, nil
+}
+
+// toDailyClasses 把解析结果铺成固定的 7 天数组（不足的天保持零值）
+func toDailyClasses(items []dailyClassInput) [7]dbTable.DailyClass {
+	var daily [7]dbTable.DailyClass
+	for i := 0; i < 7 && i < len(items); i++ {
+		daily[i] = dbTable.DailyClass{
+			Chinese:   items[i].Chinese,
+			English:   items[i].English,
+			ClassList: parseClassList(items[i].ClassList),
+			Timetable: items[i].Timetable,
+		}
+	}
+	return daily
 }
 
 func PutScheduleConfig(c *gin.Context) {
@@ -562,39 +525,12 @@ func PutScheduleConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// 契约校验：请求体必须携带完整的 7 天 daily_class 数组，
-	// 否则会导致该班课表被静默清空（防坏请求覆盖既有数据）
-	bodyMap := raw
-	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
-		bodyMap = modelVal
-	}
-	dailyClassRaw, ok := bodyMap["daily_class"].([]interface{})
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "daily_class 必须为数组"})
+	body, err := parseSchedulePayloadStrict(raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(dailyClassRaw) != 7 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "daily_class 必须包含 7 天（日一二三四五六）"})
-		return
-	}
-	for index, one := range dailyClassRaw {
-		if _, isObj := one.(map[string]interface{}); !isObj {
-			// 契约校验：非对象条目会导致对应日期写入零值课表（部分清空），必须拒绝
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("daily_class[%d] 必须为对象", index)})
-			return
-		}
-	}
-	body := parseSchedulePayload(raw)
-
-	var daily [7]dbTable.DailyClass
-	for i := 0; i < 7 && i < len(body.DailyClass); i++ {
-		daily[i] = dbTable.DailyClass{
-			Chinese:   body.DailyClass[i].Chinese,
-			English:   body.DailyClass[i].English,
-			ClassList: parseClassList(body.DailyClass[i].ClassList),
-			Timetable: body.DailyClass[i].Timetable,
-		}
-	}
+	daily := toDailyClasses(body.DailyClass)
 	timetable := db.GetTimetableNs(ns, school, grade)
 	service.FixWrongTimetable(&daily, timetable.Timetable)
 
@@ -604,6 +540,7 @@ func PutScheduleConfig(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(ns, school, grade)
+	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
@@ -626,12 +563,13 @@ func PutSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	record := dbTable.ClientConfig{Namespace: ns, School: school, Grade: grade, Class: classNumber, ClientConfigItems: body}
+	record := dbTable.ClientConfig{School: school, Grade: grade, Class: classNumber, ClientConfigItems: body}
 	if err := db.GetDB().Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "namespace"}, {Name: "school"}, {Name: "grade"}, {Name: "class"}}, UpdateAll: true}).Create(&record).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	// 通用设置影响桌面端渲染，广播刷新
 	client.BroadcastSync(ns, school, grade)
+	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }

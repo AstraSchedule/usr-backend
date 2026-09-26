@@ -3,6 +3,7 @@ package db
 import (
 	"AstraScheduleServerGo/model/dbTable"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -38,6 +39,15 @@ func DeleteCountdownRecordNs(namespace, id string) (int64, error) {
 		return 0, nil
 	}
 	resp := GetDB().Where("id = ?", id).Where("namespace = ?", namespace).Delete(&dbTable.CountdownRecord{})
+	return resp.RowsAffected, resp.Error
+}
+
+// DeleteCountdownRecordNsTx 在给定连接上按命名空间删除倒数日：与版本推进同事务时传入 tx
+func DeleteCountdownRecordNsTx(tx *gorm.DB, namespace, id string) (int64, error) {
+	if namespace == "" {
+		return 0, nil
+	}
+	resp := tx.Where("id = ?", id).Where("namespace = ?", namespace).Delete(&dbTable.CountdownRecord{})
 	return resp.RowsAffected, resp.Error
 }
 
