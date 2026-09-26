@@ -1,7 +1,11 @@
 name: Build and Deploy SaaS
 
+# 同上：PR 阶段只跑 test/build，deploy 仅在 push 到 saas/main 时执行
 on:
   push:
+    branches:
+      - saas/main
+  pull_request:
     branches:
       - saas/main
   workflow_dispatch:
@@ -53,6 +57,8 @@ jobs:
 
   deploy-fc:
     needs: build
+    # PR 上只验证构建，不部署
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
