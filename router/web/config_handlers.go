@@ -113,6 +113,25 @@ func GetSubjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"abbr": abbr, "fullName": fullName})
 }
 
+// parseTextItems 从请求体里的数组抽取 text 字段（非对象或非字符串的项跳过）
+func parseTextItems(raw interface{}) []textItem {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	items := make([]textItem, 0, len(arr))
+	for _, item := range arr {
+		obj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if text, ok := obj["text"].(string); ok {
+			items = append(items, textItem{Text: text})
+		}
+	}
+	return items
+}
+
 func PutSubjects(c *gin.Context) {
 	school := c.Param("school")
 	grade := c.Param("grade")
@@ -125,24 +144,9 @@ func PutSubjects(c *gin.Context) {
 	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
 		bodyMap = modelVal
 	}
-	body := subjectsPayload{}
-	if arr, ok := bodyMap["abbr"].([]interface{}); ok {
-		for _, item := range arr {
-			if obj, ok := item.(map[string]interface{}); ok {
-				if text, ok := obj["text"].(string); ok {
-					body.Abbr = append(body.Abbr, textItem{Text: text})
-				}
-			}
-		}
-	}
-	if arr, ok := bodyMap["fullName"].([]interface{}); ok {
-		for _, item := range arr {
-			if obj, ok := item.(map[string]interface{}); ok {
-				if text, ok := obj["text"].(string); ok {
-					body.FullName = append(body.FullName, textItem{Text: text})
-				}
-			}
-		}
+	body := subjectsPayload{
+		Abbr:     parseTextItems(bodyMap["abbr"]),
+		FullName: parseTextItems(bodyMap["fullName"]),
 	}
 	m := map[string]string{}
 	limit := len(body.Abbr)
@@ -161,38 +165,44 @@ func PutSubjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
+// sortedTimetableNames 返回作息名（字典序），并把「常日」置于首位
+func sortedTimetableNames(table map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(table))
+	for name := range table {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if k == "常日" {
+			return append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
+		}
+	}
+	return keys
+}
+
+// timetablePeriodCount 该作息需要的课节数（值里的最大下标 + 1）
+func timetablePeriodCount(config map[string]interface{}) int {
+	need := 0
+	for _, v := range config {
+		i, ok := serviceAsInt(v)
+		if !ok {
+			continue
+		}
+		if i+1 > need {
+			need = i + 1
+		}
+	}
+	return need
+}
+
 func GetTimetableOptions(c *gin.Context) {
 	school := c.Param("school")
 	grade := c.Param("grade")
 	timetable := db.GetTimetable(school, grade)
-	options := make([]gin.H, 0)
-	keys := make([]string, 0, len(timetable.Timetable))
-	for name := range timetable.Timetable {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	if len(keys) > 0 {
-		for i, k := range keys {
-			if k == "常日" {
-				keys = append([]string{"常日"}, append(keys[:i], keys[i+1:]...)...)
-				break
-			}
-		}
-	}
-
+	keys := sortedTimetableNames(timetable.Timetable)
+	options := make([]gin.H, 0, len(keys))
 	for _, name := range keys {
-		config := timetable.Timetable[name]
-		need := 0
-		for _, v := range config {
-			i, ok := serviceAsInt(v)
-			if !ok {
-				continue
-			}
-			if i+1 > need {
-				need = i + 1
-			}
-		}
-		options = append(options, gin.H{"label": name, "value": name, "need": need})
+		options = append(options, gin.H{"label": name, "value": name, "need": timetablePeriodCount(timetable.Timetable[name])})
 	}
 	c.JSON(http.StatusOK, gin.H{"options": options})
 }
@@ -230,6 +240,20 @@ func PutTimetable(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
+// loadForCopy 读取复制来源的配置：找不到与查询失败都直接写好响应，返回 false 时调用方 return。
+// 四处来源（科目 / 作息 / 课表 / 通用设置）的读取与错误处理完全同构，抽出来避免重复。
+func loadForCopy(c *gin.Context, conn *gorm.DB, dest interface{}, where string, missing string, args ...interface{}) bool {
+	if err := conn.Where(where, args...).Take(dest).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"detail": missing})
+			return false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 func CopyConfig(c *gin.Context) {
 	var payload copyConfigPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -258,42 +282,22 @@ func CopyConfig(c *gin.Context) {
 	dbConn := db.GetDB()
 
 	var srcSubject dbTable.Subject
-	if err := dbConn.Where("school = ? AND grade = ?", payload.From.School, payload.From.Grade).Take(&srcSubject).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源科目配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !loadForCopy(c, dbConn, &srcSubject, "school = ? AND grade = ?", "未找到来源科目配置", payload.From.School, payload.From.Grade) {
 		return
 	}
 
 	var srcTimetable dbTable.Timetable
-	if err := dbConn.Where("school = ? AND grade = ?", payload.From.School, payload.From.Grade).Take(&srcTimetable).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源作息配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !loadForCopy(c, dbConn, &srcTimetable, "school = ? AND grade = ?", "未找到来源作息配置", payload.From.School, payload.From.Grade) {
 		return
 	}
 
 	var srcSchedule dbTable.Schedule
-	if err := dbConn.Where("school = ? AND grade = ? AND class = ?", payload.From.School, payload.From.Grade, fromClass).Take(&srcSchedule).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源课程表配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !loadForCopy(c, dbConn, &srcSchedule, "school = ? AND grade = ? AND class = ?", "未找到来源课程表配置", payload.From.School, payload.From.Grade, fromClass) {
 		return
 	}
 
 	var srcSettings dbTable.ClientConfig
-	if err := dbConn.Where("school = ? AND grade = ? AND class = ?", payload.From.School, payload.From.Grade, fromClass).Take(&srcSettings).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"detail": "未找到来源通用设置配置"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !loadForCopy(c, dbConn, &srcSettings, "school = ? AND grade = ? AND class = ?", "未找到来源通用设置配置", payload.From.School, payload.From.Grade, fromClass) {
 		return
 	}
 
@@ -345,7 +349,7 @@ func CopyConfig(c *gin.Context) {
 		return
 	}
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()

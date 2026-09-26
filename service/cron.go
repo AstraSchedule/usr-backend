@@ -203,6 +203,23 @@ func cronHitAt(day time.Time, hour, minute int) (time.Time, bool) {
 	return hit, true
 }
 
+// latestMinuteInHour 在该小时内从 maxMinute 往前找最晚的命中时刻（不晚于 limit）
+func (s cronSpec) latestMinuteInHour(day time.Time, hour, maxMinute int, limit time.Time) (time.Time, bool) {
+	for minute := maxMinute; minute >= 0; minute-- {
+		if !s.minute.match(minute) {
+			continue
+		}
+		candidate, valid := cronHitAt(day, hour, minute)
+		if !valid {
+			continue // 该时刻当天不存在（DST 春季跳变），跳过
+		}
+		if !candidate.After(limit) {
+			return candidate, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
 	// 只有与 limit 同一天时才需要按 limit 截断，更早的日子整天都可取（从 23 时开始倒推）
 	onLimitDay := sameDate(day, limit)
@@ -218,17 +235,8 @@ func (s cronSpec) lastHitOfDay(day, limit time.Time) (time.Time, bool) {
 		if onLimitDay && hour == limit.Hour() {
 			maxMinute = limit.Minute()
 		}
-		for minute := maxMinute; minute >= 0; minute-- {
-			if !s.minute.match(minute) {
-				continue
-			}
-			candidate, valid := cronHitAt(day, hour, minute)
-			if !valid {
-				continue // 该时刻当天不存在（DST 春季跳变），跳过
-			}
-			if !candidate.After(limit) {
-				return candidate, true
-			}
+		if candidate, ok := s.latestMinuteInHour(day, hour, maxMinute, limit); ok {
+			return candidate, true
 		}
 	}
 	return time.Time{}, false
