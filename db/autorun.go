@@ -46,6 +46,19 @@ func hasDisabledEntry(record dbTable.AutorunRecord) bool {
 	return false
 }
 
+// expiredCleanable 判定一条任务是否属于「已过期且可清理」。
+// 任务级停用、含停用条目（TaskStatus 会跳过停用条目，整条删除会丢掉用户保存的配置）、
+// 以及创建时间仍在保留期内的任务一律保留。
+func expiredCleanable(record dbTable.AutorunRecord, today time.Time, cutoff time.Time) bool {
+	if record.Disabled || hasDisabledEntry(record) {
+		return false
+	}
+	if service.TaskStatus(record, today) != autorunStatusExpired {
+		return false
+	}
+	return cutoff.IsZero() || !record.CreatedAt.After(cutoff)
+}
+
 // DeleteExpiredAutorunRecords 删除「已过期且未停用」的自动任务，返回删除数量与被删作用域。
 // minAge > 0 时只清创建时间早于 now-minAge 的记录：自动清理用这个门槛，
 // 避免刚建就过期（例如补录的历史调休）的任务立刻被清掉。
@@ -66,14 +79,7 @@ func DeleteExpiredAutorunRecords(today time.Time, minAge time.Duration) (int64, 
 		}
 		ids := make([]string, 0, len(records))
 		for _, record := range records {
-			// 任务级停用、含停用条目、创建时间仍在保留期内：都保留
-			if record.Disabled || hasDisabledEntry(record) {
-				continue
-			}
-			if service.TaskStatus(record, today) != autorunStatusExpired {
-				continue
-			}
-			if !cutoff.IsZero() && record.CreatedAt.After(cutoff) {
+			if !expiredCleanable(record, today, cutoff) {
 				continue
 			}
 			ids = append(ids, record.HashID)

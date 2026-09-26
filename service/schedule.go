@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// dateLayout 日期字符串的统一布局（管理端与规则条件都按本地日期传递）
+const dateLayout = "2006-01-02"
+
 type scheduleRuleCandidate struct {
 	Level int
 	Spec  int
@@ -201,7 +204,7 @@ func parseSwapSide(raw interface{}) (swapSide, bool) {
 		return swapSide{}, false
 	}
 	dateStr, _ := obj["date"].(string)
-	date, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+	date, err := time.ParseInLocation(dateLayout, dateStr, time.Local)
 	if err != nil {
 		return swapSide{}, false
 	}
@@ -296,7 +299,7 @@ func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[
 
 	for _, c := range collectCandidates(records, 0, school, grade, classNumber, ctx) {
 		useDateStr, _ := c.Rule["useDate"].(string)
-		useDate, err := time.Parse("2006-01-02", useDateStr)
+		useDate, err := time.Parse(dateLayout, useDateStr)
 		if err != nil {
 			continue
 		}
@@ -392,7 +395,7 @@ func CalcWeekNumber(startDateStr string, now time.Time) int {
 		return 1
 	}
 	location := now.Location()
-	start, err := time.ParseInLocation("2006-01-02", startDateStr, location)
+	start, err := time.ParseInLocation(dateLayout, startDateStr, location)
 	if err != nil {
 		return 1
 	}
