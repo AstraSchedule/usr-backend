@@ -162,6 +162,7 @@ func PutSubjects(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(school, grade)
+	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
@@ -237,6 +238,7 @@ func PutTimetable(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(school, grade)
+	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
@@ -382,6 +384,7 @@ func CopyConfig(c *gin.Context) {
 
 	// 复制后通知目标班级所在年级的在线客户端刷新（来源班级数据未变，无需广播）
 	client.BroadcastSync(payload.To.School, payload.To.Grade)
+	setPurgeScopes(c, []string{purgeScope(payload.To.School, payload.To.Grade, toClass)})
 	c.JSON(http.StatusOK, gin.H{
 		"status": 200,
 		"from": gin.H{
@@ -528,6 +531,7 @@ func PutScheduleConfig(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(school, grade)
+	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
@@ -555,5 +559,6 @@ func PutSettings(c *gin.Context) {
 	}
 	// 通用设置影响桌面端渲染，广播刷新
 	client.BroadcastSync(school, grade)
+	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }

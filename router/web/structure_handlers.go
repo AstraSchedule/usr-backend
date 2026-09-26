@@ -446,5 +446,6 @@ func DeleteClass(c *gin.Context) {
 		return
 	}
 	broadcastScopes([]string{school + "/" + grade})
+	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "班级已删除"})
 }

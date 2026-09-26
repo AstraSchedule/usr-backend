@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
@@ -319,3 +320,46 @@ func deleteWithVersionBump(scopes []string, remove func(tx *gorm.DB) (int64, err
 	return affected, nil
 }
 
+// purgeScopesHeader 声明本次写入让哪些班级的版本缓存失效（边缘据此删 KV）。
+// 值是逗号分隔的 school/grade/class；边缘读不到或读不懂时不做任何操作。
+const purgeScopesHeader = "X-Astra-Purge-Scopes"
+
+// setPurgeScopes 在响应头里声明本次写入的失效范围。
+// 必须在写响应体（c.JSON）之前调用——响应一旦开始写出，头就改不动了。
+// 空列表不设置该头：没有失效声明等价于「这次写入与缓存无关」。
+func setPurgeScopes(c *gin.Context, scopes []string) {
+	cleaned := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if trimmed := strings.TrimSpace(scope); trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	if len(cleaned) == 0 {
+		return
+	}
+	c.Header(purgeScopesHeader, strings.Join(cleaned, ","))
+}
+
+// purgeScope 拼一个班级作用域（与源站 scope 的字面格式一致）
+func purgeScope(school, grade, class string) string {
+	return strings.Join([]string{school, grade, class}, "/")
+}
+
+// purgeScopesOfGrade 把年级级改动展开成该年级下所有班级的作用域：
+// 边缘的 KV 键是班级粒度，年级级写入必须逐班声明，否则缓存不会失效。
+func purgeScopesOfGrade(school, grade string) []string {
+	classes := make([]string, 0)
+	if err := db.GetDB().Model(&dbTable.Schedule{}).
+		Where("school = ? AND grade = ?", school, grade).
+		Pluck("class", &classes).Error; err != nil {
+		return nil
+	}
+	scopes := make([]string, 0, len(classes))
+	for _, class := range classes {
+		if class == "" {
+			continue
+		}
+		scopes = append(scopes, purgeScope(school, grade, class))
+	}
+	return scopes
+}
