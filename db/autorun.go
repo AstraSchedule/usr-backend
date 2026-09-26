@@ -25,7 +25,12 @@ func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
 }
 
 func DeleteAutorunRecord(hashid string) (int64, error) {
-	resp := GetDB().Where(hashIDWhere, hashid).Delete(&dbTable.AutorunRecord{})
+	return DeleteAutorunRecordTx(GetDB(), hashid)
+}
+
+// DeleteAutorunRecordTx 在给定连接上删除任务：调用方需要与版本推进同事务时传入 tx
+func DeleteAutorunRecordTx(tx *gorm.DB, hashid string) (int64, error) {
+	resp := tx.Where(hashIDWhere, hashid).Delete(&dbTable.AutorunRecord{})
 	return resp.RowsAffected, resp.Error
 }
 
@@ -81,7 +86,16 @@ func DeleteExpiredAutorunRecords(today time.Time, minAge time.Duration) (int64, 
 		resp := tx.Where("disabled = ?", false).Where("hash_id IN ?", ids).
 			Delete(&dbTable.AutorunRecord{})
 		deleted = resp.RowsAffected
-		return resp.Error
+		if resp.Error != nil {
+			return resp.Error
+		}
+		if deleted > 0 {
+			// 与删除同事务推进版本：清理的是「难以精确到班」的作用域，用全局版本兜底
+			if err := BumpDataVersion(tx, "", "", "", today); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return 0, nil, err

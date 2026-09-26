@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -537,7 +538,9 @@ func DeleteAutorunRecord(c *gin.Context) {
 	if rows, err := db.FetchAutorunRecords(hashid); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	affected, err := db.DeleteAutorunRecord(hashid)
+	affected, err := deleteWithVersionBump(scopes, func(tx *gorm.DB) (int64, error) {
+		return db.DeleteAutorunRecordTx(tx, hashid)
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -559,6 +562,7 @@ func DeleteExpiredAutorunRecords(c *gin.Context) {
 		return
 	}
 	if deleted > 0 {
+		// 版本推进已在 db 层的同一事务内完成
 		broadcastScopes(scopes)
 	}
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": deleted})

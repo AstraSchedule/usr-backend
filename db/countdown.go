@@ -3,6 +3,7 @@ package db
 import (
 	"AstraScheduleServerGo/model/dbTable"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -17,7 +18,12 @@ func FetchCountdownRecords(id string) ([]dbTable.CountdownRecord, error) {
 }
 
 func DeleteCountdownRecord(id string) (int64, error) {
-	resp := GetDB().Where("id = ?", id).Delete(&dbTable.CountdownRecord{})
+	return DeleteCountdownRecordTx(GetDB(), id)
+}
+
+// DeleteCountdownRecordTx 在给定连接上删除倒数日：与版本推进同事务时传入 tx
+func DeleteCountdownRecordTx(tx *gorm.DB, id string) (int64, error) {
+	resp := tx.Where("id = ?", id).Delete(&dbTable.CountdownRecord{})
 	return resp.RowsAffected, resp.Error
 }
 

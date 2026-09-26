@@ -2,7 +2,10 @@ package web
 
 import (
 	"AstraScheduleServerGo/model/dbTable"
+	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/router/client"
+
+	"gorm.io/gorm"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +13,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 func parseScopeInput(raw interface{}) []string {
@@ -263,3 +269,53 @@ func mergeScopes(oldScopes, newScopes []string) []string {
 func broadcastScopes(scopes []string) int {
 	return client.BroadcastScopes(scopes)
 }
+
+// bumpDataVersionForDeletedScopes 为「删除操作」推进数据版本。
+// 作用域精确到班级时只推进该班；年级/学校/ALL 这类更粗的作用域用全局版本兜底
+// （DataVersion 的粒度是班级，粗作用域无法一一枚举到具体班级）。
+// 删除此时已经提交，版本推进失败无法回滚，因此只记录告警：让缓存多等一轮，
+// 也好过把一次已经生效的删除报成失败。
+func bumpDataVersionForDeletedScopes(conn *gorm.DB, scopes []string) {
+	now := time.Now()
+	bumped := make(map[string]struct{})
+	for _, raw := range scopes {
+		parts := strings.Split(strings.TrimSpace(raw), "/")
+		school, grade, class := "", "", ""
+		if len(parts) >= 3 && parts[0] != "" && parts[1] != "" && parts[2] != "" {
+			school, grade, class = parts[0], parts[1], parts[2]
+		}
+		key := school + "/" + grade + "/" + class
+		if _, done := bumped[key]; done {
+			continue
+		}
+		bumped[key] = struct{}{}
+		if err := db.BumpDataVersion(conn, school, grade, class, now); err != nil {
+			logrus.Warnf("推进数据版本失败（删除后缓存可能滞后）: scope=%q err=%v", raw, err)
+		}
+	}
+}
+
+// deleteWithVersionBump 在同一个事务里执行删除与版本推进。
+// 删除已生效而版本写入失败时，缓存会永久停留在旧版本，因此两者必须原子。
+// 返回删除行数：0 表示记录不存在（调用方回 404）。
+func deleteWithVersionBump(scopes []string, remove func(tx *gorm.DB) (int64, error)) (int64, error) {
+	tx := db.GetDB().Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	affected, err := remove(tx)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if affected == 0 {
+		tx.Rollback()
+		return 0, nil
+	}
+	bumpDataVersionForDeletedScopes(tx, scopes)
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
