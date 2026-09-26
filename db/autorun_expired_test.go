@@ -41,7 +41,7 @@ func TestDeleteExpiredAutorunRecords_OnlyExpiredAndEnabled(t *testing.T) {
 		require.NoError(t, database.Create(&records[i]).Error)
 	}
 
-	deleted, scopes, err := DeleteExpiredAutorunRecords(today)
+	deleted, scopes, err := DeleteExpiredAutorunRecords(today, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), deleted)
 	assert.Equal(t, []string{"school/grade/class"}, scopes)
@@ -61,7 +61,7 @@ func TestDeleteExpiredAutorunRecords_NothingToClean(t *testing.T) {
 	future := autorunRecordOnDate("future", "2026-12-01", false)
 	require.NoError(t, database.Create(&future).Error)
 
-	deleted, scopes, err := DeleteExpiredAutorunRecords(time.Date(2026, time.September, 26, 0, 0, 0, 0, time.Local))
+	deleted, scopes, err := DeleteExpiredAutorunRecords(time.Date(2026, time.September, 26, 0, 0, 0, 0, time.Local), 0)
 	require.NoError(t, err)
 	assert.Zero(t, deleted)
 	assert.Empty(t, scopes)
@@ -98,7 +98,7 @@ func TestDeleteExpiredAutorunRecords_KeepsRecordsWithDisabledEntries(t *testing.
 	}
 	require.NoError(t, database.Create(&record).Error)
 
-	deleted, scopes, err := DeleteExpiredAutorunRecords(today)
+	deleted, scopes, err := DeleteExpiredAutorunRecords(today, 0)
 	require.NoError(t, err)
 	assert.Zero(t, deleted)
 	assert.Empty(t, scopes)
@@ -106,4 +106,23 @@ func TestDeleteExpiredAutorunRecords_KeepsRecordsWithDisabledEntries(t *testing.
 	rows, err := FetchAutorunRecords("")
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
+}
+
+
+// 保留期门槛：创建时间仍在保留期内的已过期任务，自动清理不动；手动清理（minAge=0）才清
+func TestDeleteExpiredAutorunRecords_KeepsRecordsWithinRetention(t *testing.T) {
+	cleanupDB(t)
+	database := GetDB()
+	now := time.Now()
+	record := autorunRecordOnDate("fresh", "2026-09-01", false)
+	require.NoError(t, database.Create(&record).Error)
+
+	deleted, scopes, err := DeleteExpiredAutorunRecords(now, 30*24*time.Hour)
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+	assert.Empty(t, scopes)
+
+	manual, _, err := DeleteExpiredAutorunRecords(now, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), manual)
 }

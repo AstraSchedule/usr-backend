@@ -13,6 +13,10 @@ import (
 // autorunCleanInterval 自动清理已过期自动任务的最小间隔
 const autorunCleanInterval = 24 * time.Hour
 
+// autorunKeepExpired 自动清理的保留期：创建时间在保留期内的任务不清理，
+// 避免刚补录就过期的历史任务被立刻删掉。手动清理不受此限制。
+const autorunKeepExpired = 30 * 24 * time.Hour
+
 var (
 	autorunCleanMu     sync.Mutex
 	autorunLastCleaned time.Time
@@ -42,7 +46,7 @@ func MaybeCleanExpiredAutorun() {
 }
 
 func cleanExpiredAutorun() {
-	deleted, scopes, err := db.DeleteExpiredAutorunRecords(time.Now())
+	deleted, scopes, err := db.DeleteExpiredAutorunRecords(time.Now(), autorunKeepExpired)
 	if err != nil {
 		logrus.Warnf("自动清理已过期自动任务失败: %v", err)
 		return

@@ -553,7 +553,7 @@ func DeleteAutorunRecord(c *gin.Context) {
 
 // DeleteExpiredAutorunRecords 清理「已过期且未停用」的自动任务
 func DeleteExpiredAutorunRecords(c *gin.Context) {
-	deleted, scopes, err := db.DeleteExpiredAutorunRecords(time.Now())
+	deleted, scopes, err := db.DeleteExpiredAutorunRecords(time.Now(), 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
