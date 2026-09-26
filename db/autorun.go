@@ -5,10 +5,14 @@ import (
 	"AstraScheduleServerGo/service"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const hashIDWhere = "hash_id = ?"
+
+// autorunStatusExpired 任务已过期（与 service.TaskStatus 的返回值 2 一致）
+const autorunStatusExpired = 2
 
 // FetchAutorunRecords 获取自动任务记录（无命名空间，向后兼容）
 func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
@@ -57,6 +61,95 @@ func DeleteAutorunRecordNs(namespace, hashid string) (int64, error) {
 	}
 	resp := GetDB().Where(hashIDWhere, hashid).Where("namespace = ?", namespace).Delete(&dbTable.AutorunRecord{})
 	return resp.RowsAffected, resp.Error
+}
+
+// hasDisabledEntry 记录里是否含被停用的条目。TaskStatus 会跳过停用条目，
+// 所以「启用条目已结束 + 还有停用条目」的记录同样会被判为已过期；
+// 这类记录不能删，否则丢的是用户停用保留的配置。
+func hasDisabledEntry(record dbTable.AutorunRecord) bool {
+	for _, entry := range service.EntriesOf(record) {
+		if entry.Disabled {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteExpiredAutorunRecordsNs 删除某个命名空间内「已过期且未停用」的自动任务，
+// 返回删除数量与被删作用域。minAge > 0 时只清创建时间早于 now-minAge 的记录：
+// 自动清理用这个门槛，避免刚补录就过期的历史任务立刻被清掉。
+// 判定不依赖 status 列（那只是列表展示的派生缓存），而是逐条按当前时间求值；
+// 读与删在同一事务里且条件一致，并发下被停用或改期的记录不会被误删。
+func DeleteExpiredAutorunRecordsNs(namespace string, today time.Time, minAge time.Duration) (int64, []string, error) {
+	if namespace == "" {
+		return 0, nil, nil
+	}
+	cutoff := time.Time{}
+	if minAge > 0 {
+		cutoff = today.Add(-minAge)
+	}
+	scopes := make([]string, 0)
+	deleted := int64(0)
+	err := GetDB().Transaction(func(tx *gorm.DB) error {
+		records := make([]dbTable.AutorunRecord, 0)
+		if err := tx.Where("namespace = ?", namespace).Find(&records).Error; err != nil {
+			return err
+		}
+		ids := make([]string, 0, len(records))
+		for _, record := range records {
+			// 任务级停用、含停用条目、创建时间仍在保留期内：都保留
+			if record.Disabled || hasDisabledEntry(record) {
+				continue
+			}
+			if service.TaskStatus(record, today) != autorunStatusExpired {
+				continue
+			}
+			if !cutoff.IsZero() && record.CreatedAt.After(cutoff) {
+				continue
+			}
+			ids = append(ids, record.HashID)
+			scopes = append(scopes, record.Scope...)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		resp := tx.Where("namespace = ?", namespace).Where("disabled = ?", false).
+			Where("hash_id IN ?", ids).Delete(&dbTable.AutorunRecord{})
+		deleted = resp.RowsAffected
+		return resp.Error
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return deleted, scopes, nil
+}
+
+// ExpiredCleanupResult 一次跨命名空间清理中，某个命名空间被删记录的作用域
+// （调用方据此按租户广播刷新）
+type ExpiredCleanupResult struct {
+	Namespace string
+	Scopes    []string
+	Deleted   int64
+}
+
+// CleanExpiredAutorunRecords 遍历所有命名空间清理已过期任务，返回每个命名空间的删除结果
+func CleanExpiredAutorunRecords(today time.Time, minAge time.Duration) ([]ExpiredCleanupResult, error) {
+	namespaces := make([]string, 0)
+	if err := GetDB().Model(&dbTable.AutorunRecord{}).Distinct().Pluck("namespace", &namespaces).Error; err != nil {
+		return nil, err
+	}
+	results := make([]ExpiredCleanupResult, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		deleted, scopes, err := DeleteExpiredAutorunRecordsNs(namespace, today, minAge)
+		if err != nil {
+			return results, err
+		}
+		if deleted == 0 {
+			continue
+		}
+		results = append(results, ExpiredCleanupResult{Namespace: namespace, Scopes: scopes, Deleted: deleted})
+	}
+	return results, nil
 }
 
 func UpsertAutorunRecord(record *dbTable.AutorunRecord) error {

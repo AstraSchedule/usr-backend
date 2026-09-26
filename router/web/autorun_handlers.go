@@ -583,6 +583,20 @@ func DeleteAutorunRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
 
+// DeleteExpiredAutorunRecords 清理当前命名空间内「已过期且未停用」的自动任务
+func DeleteExpiredAutorunRecords(c *gin.Context) {
+	ns := middleware.GetNamespace(c)
+	deleted, scopes, err := db.DeleteExpiredAutorunRecordsNs(ns, time.Now(), 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if deleted > 0 {
+		broadcastScopes(ns, scopes)
+	}
+	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": deleted})
+}
+
 // bindAutorunContent 读取 v1 载荷的 content 字段
 func bindAutorunContent(c *gin.Context) (autorunPayload, map[string]interface{}, bool) {
 	var payload autorunPayload
