@@ -547,6 +547,8 @@ func DeleteAutorunRecord(c *gin.Context) {
 		return
 	}
 	_, _ = db.RefreshAutorunStatuses(time.Now())
+	// 记录连同 UpdatedAt 一起消失，需显式推进版本，否则 304 会让客户端继续沿用旧课表
+	bumpDataVersionForDeletedScopes(scopes)
 	broadcastScopes(scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
@@ -559,6 +561,7 @@ func DeleteExpiredAutorunRecords(c *gin.Context) {
 		return
 	}
 	if deleted > 0 {
+		bumpDataVersionForDeletedScopes(scopes)
 		broadcastScopes(scopes)
 	}
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": deleted})

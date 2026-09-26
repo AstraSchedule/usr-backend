@@ -435,6 +435,12 @@ func DeleteClass(c *gin.Context) {
 		rollbackAnd500(c, tx, err)
 		return
 	}
+	// 删除会把该班的 Schedule/ClientConfig/DataVersion 行一并带走，没有任何残留时间戳
+	// 能反映这次变化；必须显式推进版本，否则客户端会一直命中 304、继续显示已删除的课表
+	if err := db.BumpDataVersion(school, grade, classNumber, time.Now()); err != nil {
+		rollbackAnd500(c, tx, err)
+		return
+	}
 
 	if !commitOr500(c, tx) {
 		return

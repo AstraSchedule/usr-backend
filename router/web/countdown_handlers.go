@@ -206,6 +206,8 @@ func DeleteCountdownRecord(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
 		return
 	}
+	// 与自动任务同理：记录消失后没有时间戳能反映变化，需显式推进版本
+	bumpDataVersionForDeletedScopes(scopes)
 	broadcastScopes(scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": id})
 }
