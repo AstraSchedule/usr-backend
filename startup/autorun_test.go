@@ -17,7 +17,8 @@ func TestMain(m *testing.M) {
 	// InitTestDB 只负责设置 model.Configs，它建的表在它自己的连接上；
 	// 业务代码走 db.GetDB() 的单例连接，两者是不同的 :memory: 库，因此这里用业务单例建表。
 	testutil.InitTestDB()
-	if err := db.GetDB().AutoMigrate(&dbTable.AutorunRecord{}); err != nil {
+	// 自动清理会在同一事务内推进数据版本，因此 data_versions 表也必须建出来
+	if err := db.GetDB().AutoMigrate(&dbTable.AutorunRecord{}, &dbTable.DataVersion{}); err != nil {
 		panic(err)
 	}
 	os.Exit(m.Run())
