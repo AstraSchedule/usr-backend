@@ -436,6 +436,73 @@ func GetScheduleConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"daily_class": out})
 }
 
+// parseDailyClass 解析单日课表的输入；每日入口必须为对象，否则该天会被写成零值
+func parseDailyClass(index int, raw interface{}) (dailyClassInput, error) {
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return dailyClassInput{}, fmt.Errorf("daily_class[%d] 必须为对象", index)
+	}
+	item := dailyClassInput{}
+	item.Chinese, _ = obj["Chinese"].(string)
+	item.English, _ = obj["English"].(string)
+	item.Timetable, _ = obj["timetable"].(string)
+	if classListRaw, ok := obj["classList"].([]interface{}); ok {
+		for _, classItem := range classListRaw {
+			arr, ok := classItem.([]interface{})
+			if !ok {
+				continue
+			}
+			line := make([]string, 0, len(arr))
+			for _, x := range arr {
+				if s, ok := x.(string); ok {
+					line = append(line, s)
+				}
+			}
+			item.ClassList = append(item.ClassList, line)
+		}
+	}
+	return item, nil
+}
+
+// parseSchedulePayloadStrict 解析保存课表的请求体：必须是完整的 7 天数组，
+// 否则会导致对应日期被静默清空（防坏请求覆盖既有数据）。
+func parseSchedulePayloadStrict(raw map[string]interface{}) (schedulePayload, error) {
+	bodyMap := raw
+	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
+		bodyMap = modelVal
+	}
+	dailyClassRaw, ok := bodyMap["daily_class"].([]interface{})
+	if !ok {
+		return schedulePayload{}, fmt.Errorf("daily_class 必须为数组")
+	}
+	if len(dailyClassRaw) != 7 {
+		return schedulePayload{}, fmt.Errorf("daily_class 必须包含 7 天（日一二三四五六）")
+	}
+	body := schedulePayload{}
+	for index, one := range dailyClassRaw {
+		item, err := parseDailyClass(index, one)
+		if err != nil {
+			return schedulePayload{}, err
+		}
+		body.DailyClass = append(body.DailyClass, item)
+	}
+	return body, nil
+}
+
+// toDailyClasses 把解析结果铺成固定的 7 天数组（不足的天保持零值）
+func toDailyClasses(items []dailyClassInput) [7]dbTable.DailyClass {
+	var daily [7]dbTable.DailyClass
+	for i := 0; i < 7 && i < len(items); i++ {
+		daily[i] = dbTable.DailyClass{
+			Chinese:   items[i].Chinese,
+			English:   items[i].English,
+			ClassList: parseClassList(items[i].ClassList),
+			Timetable: items[i].Timetable,
+		}
+	}
+	return daily
+}
+
 func PutScheduleConfig(c *gin.Context) {
 	school := c.Param("school")
 	grade := c.Param("grade")
@@ -446,58 +513,12 @@ func PutScheduleConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	bodyMap := raw
-	if modelVal, ok := raw["model"].(map[string]interface{}); ok {
-		bodyMap = modelVal
-	}
-	// 契约校验：请求体必须携带完整的 7 天 daily_class 数组，
-	// 否则会导致该班课表被静默清空（防坏请求覆盖既有数据）。
-	dailyClassRaw, ok := bodyMap["daily_class"].([]interface{})
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "daily_class 必须为数组"})
+	body, err := parseSchedulePayloadStrict(raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(dailyClassRaw) != 7 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "daily_class 必须包含 7 天（日一二三四五六）"})
-		return
-	}
-	body := schedulePayload{}
-	for index, one := range dailyClassRaw {
-		obj, ok := one.(map[string]interface{})
-		if !ok {
-			// 契约校验：非对象条目会导致对应日期写入零值课表（部分清空），必须拒绝
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("daily_class[%d] 必须为对象", index)})
-			return
-		}
-		item := dailyClassInput{}
-		item.Chinese, _ = obj["Chinese"].(string)
-		item.English, _ = obj["English"].(string)
-		item.Timetable, _ = obj["timetable"].(string)
-		if classListRaw, ok := obj["classList"].([]interface{}); ok {
-			for _, classItem := range classListRaw {
-				if arr2, ok := classItem.([]interface{}); ok {
-					line := make([]string, 0, len(arr2))
-					for _, x := range arr2 {
-						if s, ok := x.(string); ok {
-							line = append(line, s)
-						}
-					}
-					item.ClassList = append(item.ClassList, line)
-				}
-			}
-		}
-		body.DailyClass = append(body.DailyClass, item)
-	}
-
-	var daily [7]dbTable.DailyClass
-	for i := 0; i < 7 && i < len(body.DailyClass); i++ {
-		daily[i] = dbTable.DailyClass{
-			Chinese:   body.DailyClass[i].Chinese,
-			English:   body.DailyClass[i].English,
-			ClassList: parseClassList(body.DailyClass[i].ClassList),
-			Timetable: body.DailyClass[i].Timetable,
-		}
-	}
+	daily := toDailyClasses(body.DailyClass)
 	timetable := db.GetTimetable(school, grade)
 	service.FixWrongTimetable(&daily, timetable.Timetable)
 
