@@ -3,6 +3,7 @@ package startup
 import (
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/model"
+	"AstraScheduleServerGo/router/client"
 	"sync"
 	"time"
 
@@ -41,12 +42,14 @@ func MaybeCleanExpiredAutorun() {
 }
 
 func cleanExpiredAutorun() {
-	deleted, _, err := db.DeleteExpiredAutorunRecords(time.Now())
+	deleted, scopes, err := db.DeleteExpiredAutorunRecords(time.Now())
 	if err != nil {
 		logrus.Warnf("自动清理已过期自动任务失败: %v", err)
 		return
 	}
 	if deleted > 0 {
+		// 与手动清理一致地广播：否则在线客户端不会重新拉取被清理任务影响过的课表
+		client.BroadcastScopes(scopes)
 		logrus.Infof("自动清理已过期自动任务：删除 %d 条", deleted)
 	}
 }

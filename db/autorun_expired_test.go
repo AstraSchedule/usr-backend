@@ -70,3 +70,40 @@ func TestDeleteExpiredAutorunRecords_NothingToClean(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 }
+
+// 含停用条目的记录即便已过期也必须保留：TaskStatus 跳过停用条目，
+// 删掉整条记录等于丢掉用户停用保存的配置
+func TestDeleteExpiredAutorunRecords_KeepsRecordsWithDisabledEntries(t *testing.T) {
+	cleanupDB(t)
+	database := GetDB()
+	today := time.Date(2026, time.September, 26, 0, 0, 0, 0, time.Local)
+	record := dbTable.AutorunRecord{
+		HashID: "mixed",
+		Name:   "mixed",
+		EType:  dbTable.AutorunTypeSchedule,
+		Scope:  []string{"school/grade/class"},
+		Entries: []dbTable.AutorunEntry{
+			{
+				ID:     "e1",
+				When:   &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"},
+				Action: map[string]interface{}{"schedule": map[string]interface{}{"periods": []interface{}{}}},
+			},
+			{
+				ID:       "e2",
+				Disabled: true,
+				When:     &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-12-01"},
+				Action:   map[string]interface{}{"schedule": map[string]interface{}{"periods": []interface{}{}}},
+			},
+		},
+	}
+	require.NoError(t, database.Create(&record).Error)
+
+	deleted, scopes, err := DeleteExpiredAutorunRecords(today)
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+	assert.Empty(t, scopes)
+
+	rows, err := FetchAutorunRecords("")
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+}
