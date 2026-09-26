@@ -424,23 +424,29 @@ func GetWeatherWithCity(c *gin.Context) {
 	getWeather(c, name1, "")
 }
 
-// GetWeatherWithCFHeader 通过 Cloudflare 请求头获取天气信息
-func GetWeatherWithCFHeader(c *gin.Context) {
-	cfCity := c.GetHeader("CF-IPCity")
-	cfRegion := c.GetHeader("CF-Region")
+// GetWeatherWithEdgeHeader 通过边缘节点注入的客户端地理位置请求头获取天气信息
+//
+// ESA 的「托管转换 - 添加访问者位置标头」注入 Ali-Ip-City（城市编码），
+// Cloudflare 注入 CF-IPCity / CF-Region（城市名 / 省份名）。
+// ESA 优先：站点已迁到 ESA，仍保留 CF 回退以兼容走 Cloudflare 的部署。
+//
+// 城市值直接当和风天气城市查询的 location（实测 320100 / nanjing / Nanjing / 310000 都能查到）；
+// 省份只有 CF 有，且 ESA 的行政区划编码（如 CN-JS）不在和风天气的 adm 词表里，所以 ESA 路径不传省份。
+func GetWeatherWithEdgeHeader(c *gin.Context) {
+	city := c.GetHeader("Ali-Ip-City")
+	province := ""
+	if city == "" {
+		city = c.GetHeader("CF-IPCity")
+		province = c.GetHeader("CF-Region")
+	}
 
-	if cfCity == "" {
-		logrus.Errorf("无法通过请求头获取城市信息")
+	if city == "" {
+		logrus.Errorf("无法通过边缘请求头获取城市信息")
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "无法通过请求头获取城市信息，请确保请求经过 Cloudflare",
+			"error": "无法通过请求头获取城市信息，请确保请求经过 ESA 或 Cloudflare",
 		})
 		return
 	}
 
-	province := cfRegion
-	if province == "" {
-		province = ""
-	}
-
-	getWeather(c, cfCity, province)
+	getWeather(c, city, province)
 }

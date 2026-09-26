@@ -85,8 +85,8 @@ func buildRouter() *gin.Engine {
 	router.GET("/api/weather/:name1/:name2", cache.CachePage(weatherCacheStore, 10*time.Minute, client.GetWeatherWithProvince))
 	// 通过省份和城市查询天气
 	router.GET("/api/weather/:name1", cache.CachePage(weatherCacheStore, 10*time.Minute, client.GetWeatherWithCity))
-	// 通过 CF 头查询天气
-	router.GET("/api/weather/", client.GetWeatherWithCFHeader)
+	// 通过边缘（ESA / CF）注入的客户端地理位置头查询天气
+	router.GET("/api/weather/", client.GetWeatherWithEdgeHeader)
 	// WebSocket
 	router.Any("/ws/:school/:grade/:class_number", client.WebSocketPlaceholder)
 	// 注意：/api/broadcast 外部广播入口已废弃移除，广播仅由后端写操作内部触发（client.BroadcastSync*）

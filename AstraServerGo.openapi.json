@@ -2314,17 +2314,18 @@
     },
     "/api/weather/": {
       "get": {
-        "summary": "通过 Cloudflare 请求头查询天气",
-        "description": "通过 CF-IPCity / CF-Region 请求头自动定位查询天气。",
-        "operationId": "getWeatherWithCFHeader",
+        "summary": "通过边缘注入的客户端地理位置请求头查询天气",
+        "description": "优先用 ESA 托管转换注入的 Ali-Ip-City（城市编码）定位；没有该头时回退到 Cloudflare 的 CF-IPCity / CF-Region（城市名 / 省份名）。",
+        "operationId": "getWeatherWithEdgeHeader",
         "tags": ["weather"],
         "parameters": [
-          { "name": "CF-IPCity", "in": "header", "description": "Cloudflare 城市头", "required": false, "schema": { "type": "string" } },
-          { "name": "CF-Region", "in": "header", "description": "Cloudflare 省份头", "required": false, "schema": { "type": "string" } }
+          { "name": "Ali-Ip-City", "in": "header", "description": "ESA 托管转换注入的城市编码头", "required": false, "schema": { "type": "string" } },
+          { "name": "CF-IPCity", "in": "header", "description": "Cloudflare 城市头（回退）", "required": false, "schema": { "type": "string" } },
+          { "name": "CF-Region", "in": "header", "description": "Cloudflare 省份头（回退）", "required": false, "schema": { "type": "string" } }
         ],
         "responses": {
           "200": { "description": "查询成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherResponse" } } } },
-          "400": { "description": "缺少 CF 头", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } },
+          "400": { "description": "缺少边缘地理位置头", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } },
           "404": { "description": "城市不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WeatherNotFoundResponse" } } } },
           "502": { "description": "天气 API 调用失败", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorWithErrorField" } } } }
         },
