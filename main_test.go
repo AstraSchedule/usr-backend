@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"time"
 	"testing"
 
 	"AstraScheduleServerGo/db"
@@ -626,4 +627,47 @@ func TestRouteTable_ClientPutScheduleFlow(t *testing.T) {
 	assert.Contains(t, resp, "version")
 	assert.Equal(t, "来自客户端", resp["banner_text"])
 	assert.Equal(t, "数学", resp["subject_name"].(map[string]interface{})["数"])
+}
+
+// 自动任务清理挂在全局中间件上：配置开启时，任意请求都应顺带触发一次后台清理。
+// 这条覆盖「中间件真的挂上了」这一环——startup 包的用例直接调用触发函数，覆盖不到这里。
+func TestRouteTable_RequestTriggersAutorunCleanup(t *testing.T) {
+	router := setupContractEnv(t)
+	model.Configs.Autorun.AutoClean = true
+	t.Cleanup(func() { model.Configs.Autorun.AutoClean = false })
+
+	// 造一条已过期且超出保留期的任务（CreatedAt 显式设为过去，绕过自动时间戳）
+	createdAt := time.Now().AddDate(0, 0, -60)
+	expired := dbTable.AutorunRecord{
+		HashID:    "contract-expired",
+		Name:      "contract-expired",
+		EType:     dbTable.AutorunTypeSchedule,
+		Scope:     []string{"contract-school/2024/1"},
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+		Entries: []dbTable.AutorunEntry{{
+			ID:   "entry-1",
+			When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-01-01"},
+			Action: map[string]interface{}{
+				"schedule": map[string]interface{}{"periods": []interface{}{}},
+			},
+		}},
+	}
+	require.NoError(t, db.GetDB().Where("hash_id = ?", expired.HashID).Delete(&dbTable.AutorunRecord{}).Error)
+	require.NoError(t, db.GetDB().Create(&expired).Error)
+
+	// 任意请求即可：清理中间件在认证之前执行，因此匿名请求也会触发
+	contractRequest(t, router, http.MethodGet, "/web/menu", nil, nil)
+
+	// 只盯自己造的那条：库里可能还有其它用例留下的任务，断言整表为空会误报
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		rows, err := db.FetchAutorunRecords(expired.HashID)
+		require.NoError(t, err)
+		if len(rows) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("请求未触发自动清理：过期任务仍在库中")
 }
