@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -537,26 +538,15 @@ func DeleteAutorunRecord(c *gin.Context) {
 	if rows, err := db.FetchAutorunRecords(hashid); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	// 删除与版本推进放在同一事务：删除已生效而版本写入失败时，缓存会永久停留在旧版本
-	tx := db.GetDB().Begin()
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
-		return
-	}
-	affected, err := db.DeleteAutorunRecordTx(tx, hashid)
+	affected, err := deleteWithVersionBump(scopes, func(tx *gorm.DB) (int64, error) {
+		return db.DeleteAutorunRecordTx(tx, hashid)
+	})
 	if err != nil {
-		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if affected == 0 {
-		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
-		return
-	}
-	bumpDataVersionForDeletedScopes(tx, scopes)
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	_, _ = db.RefreshAutorunStatuses(time.Now())

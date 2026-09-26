@@ -294,3 +294,28 @@ func bumpDataVersionForDeletedScopes(conn *gorm.DB, scopes []string) {
 		}
 	}
 }
+
+// deleteWithVersionBump 在同一个事务里执行删除与版本推进。
+// 删除已生效而版本写入失败时，缓存会永久停留在旧版本，因此两者必须原子。
+// 返回删除行数：0 表示记录不存在（调用方回 404）。
+func deleteWithVersionBump(scopes []string, remove func(tx *gorm.DB) (int64, error)) (int64, error) {
+	tx := db.GetDB().Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	affected, err := remove(tx)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if affected == 0 {
+		tx.Rollback()
+		return 0, nil
+	}
+	bumpDataVersionForDeletedScopes(tx, scopes)
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+

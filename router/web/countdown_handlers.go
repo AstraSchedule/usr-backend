@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func normalizeCountdownSchedules(items []countdownScheduleInput) []dbTable.CountdownScheduleItem {
@@ -197,26 +198,15 @@ func DeleteCountdownRecord(c *gin.Context) {
 	if rows, err := db.FetchCountdownRecords(id); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	// 与自动任务同理：删除与版本推进同事务，避免缓存永久陈旧
-	tx := db.GetDB().Begin()
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
-		return
-	}
-	affected, err := db.DeleteCountdownRecordTx(tx, id)
+	affected, err := deleteWithVersionBump(scopes, func(tx *gorm.DB) (int64, error) {
+		return db.DeleteCountdownRecordTx(tx, id)
+	})
 	if err != nil {
-		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if affected == 0 {
-		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
-		return
-	}
-	bumpDataVersionForDeletedScopes(tx, scopes)
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	broadcastScopes(scopes)
