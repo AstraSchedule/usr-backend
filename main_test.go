@@ -114,7 +114,7 @@ func TestRouteTable_AnonymousMatrix(t *testing.T) {
 		{"WebSocket 无升级头", "GET", "/ws/s1/g1/c1", nil, http.StatusBadRequest},
 		{"天气省市区查询无凭据", "GET", "/api/weather/shanghai/pudong", nil, http.StatusForbidden},
 		{"天气城市查询无凭据", "GET", "/api/weather/shanghai", nil, http.StatusForbidden},
-		{"天气 CF 头查询无头", "GET", "/api/weather/", nil, http.StatusBadRequest},
+		{"天气 边缘头查询无头", "GET", "/api/weather/", nil, http.StatusBadRequest},
 		{"菜单", "GET", "/web/menu", nil, http.StatusOK},
 		{"结构树", "GET", "/web/structure", nil, http.StatusOK},
 		{"备份导出需认证", "GET", "/web/backup/export", nil, http.StatusUnauthorized},

@@ -395,19 +395,42 @@ func TestGetWeatherWithCity_Success(t *testing.T) {
 	assert.Equal(t, "25", resp.Temp)
 }
 
-func TestGetWeatherWithCFHeader_NoCFHeader(t *testing.T) {
+// useWeatherMockHost 把城市/天气上游指向 mock 服务器
+func useWeatherMockHost(t *testing.T, mock *httptest.Server) {
+	t.Helper()
+	origHost := model.Configs.APIKey.APIHost
+	model.Configs.APIKey.APIHost = strings.TrimPrefix(mock.URL, "https://")
+	t.Cleanup(func() { model.Configs.APIKey.APIHost = origHost })
+}
+
+// doWeatherEdgeRequest 带上指定的边缘地理位置头发起一次 /api/weather/ 请求
+func doWeatherEdgeRequest(t *testing.T, router *gin.Engine, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("GET", "/api/weather/", nil)
+	if err != nil {
+		t.Fatalf("构造请求失败: %v", err)
+		return nil
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	router.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetWeatherWithEdgeHeader_NoHeader(t *testing.T) {
 	ensureTestDB()
 
 	router := setupTestRouter()
-	router.GET("/api/weather/", GetWeatherWithCFHeader)
+	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
 
-	w := doClientRequest(t, router, "GET", "/api/weather/")
-
-	// 没有 CF-IPCity 头时应返回 400
+	// 既没有 ESA 头也没有 CF 头时应返回 400
+	w := doWeatherEdgeRequest(t, router, nil)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
+func TestGetWeatherWithEdgeHeader_NoCredential(t *testing.T) {
 	ensureTestDB()
 
 	// 未配置天气认证时返回 403（不发起上游请求，也不计入统计）
@@ -416,41 +439,75 @@ func TestGetWeatherWithCFHeader_NoCredential(t *testing.T) {
 	t.Cleanup(func() { model.Configs.APIKey = origAPIKey })
 
 	router := setupTestRouter()
-	router.GET("/api/weather/", GetWeatherWithCFHeader)
+	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
 
 	// 清除城市查询缓存，确保缺少认证信息时先走认证校验。
-	cache.Delete("上海_上海")
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/", nil)
-	req.Header.Set("CF-IPCity", "上海")
-	req.Header.Set("CF-Region", "上海")
-	router.ServeHTTP(w, req)
+	cache.Delete("320100_")
+	w := doWeatherEdgeRequest(t, router, map[string]string{"Ali-Ip-City": "320100"})
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-func TestGetWeatherWithCFHeader_Success(t *testing.T) {
+func TestGetWeatherWithEdgeHeader_ESASuccess(t *testing.T) {
 	ensureTestDB()
-	mock := setupMockWeatherServer(t)
-
-	origHost := model.Configs.APIKey.APIHost
-	model.Configs.APIKey.APIHost = strings.TrimPrefix(mock.URL, "https://")
-	t.Cleanup(func() { model.Configs.APIKey.APIHost = origHost })
+	useWeatherMockHost(t, setupMockWeatherServer(t))
 
 	router := setupTestRouter()
-	router.GET("/api/weather/", GetWeatherWithCFHeader)
+	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/weather/", nil)
-	req.Header.Set("CF-IPCity", "北京")
-	req.Header.Set("CF-Region", "北京")
-	router.ServeHTTP(w, req)
+	cache.Delete("320100_")
+	w := doWeatherEdgeRequest(t, router, map[string]string{"Ali-Ip-City": "320100"})
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.WeatherResponse
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, "北京", resp.Where)
 	assert.Equal(t, "25", resp.Temp)
+	// 城市查询确实用了 ESA 头里的城市编码作为 location，且不带省份（ESA 路径不传 adm）
+	_, cached := cache.Load("320100_")
+	assert.True(t, cached, "应以 Ali-Ip-City 的值发起城市查询")
+}
+
+// 契约：ESA 头优先于同时存在的 CF 头，避免两个边缘头打架
+func TestGetWeatherWithEdgeHeader_ESATakesPrecedence(t *testing.T) {
+	ensureTestDB()
+	useWeatherMockHost(t, setupMockWeatherServer(t))
+
+	router := setupTestRouter()
+	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
+
+	cache.Delete("320100_")
+	cache.Delete("上海_上海")
+	w := doWeatherEdgeRequest(t, router, map[string]string{
+		"Ali-Ip-City": "320100",
+		"CF-IPCity":   "上海",
+		"CF-Region":   "上海",
+	})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	_, esaUsed := cache.Load("320100_")
+	assert.True(t, esaUsed, "应使用 Ali-Ip-City")
+	_, cfUsed := cache.Load("上海_上海")
+	assert.False(t, cfUsed, "不应回退到 CF-IPCity")
+}
+
+// 契约：只有 CF 头时保持迁移前的行为（CF-Region 仍作为省份）
+func TestGetWeatherWithEdgeHeader_CloudflareFallback(t *testing.T) {
+	ensureTestDB()
+	useWeatherMockHost(t, setupMockWeatherServer(t))
+
+	router := setupTestRouter()
+	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
+
+	cache.Delete("上海_上海")
+	w := doWeatherEdgeRequest(t, router, map[string]string{"CF-IPCity": "上海", "CF-Region": "上海"})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp model.WeatherResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "北京", resp.Where)
+	_, cached := cache.Load("上海_上海")
+	assert.True(t, cached, "CF 回退时应带上 CF-Region 作为 adm")
 }
 
 // WebSocket tests
