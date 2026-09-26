@@ -1,7 +1,12 @@
 name: Build and Release
 
+# PR 阶段只跑 test/build，release 仅在 push 到 main 时执行：
+# 这样 test 红能拦在合并前，而不是等合并进 main 之后才发现
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
   workflow_dispatch:
@@ -94,6 +99,8 @@ jobs:
 
   release:
     needs: build
+    # PR 上只验证构建，不产出 Release（避免预发产物污染版本号）
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
