@@ -12,6 +12,7 @@ func StartInit() {
 	ReadConfig()
 	SetLog()
 	MigrateDb()
+	StartAutorunCleaner()
 	EnsureAdminUser()
 }
 

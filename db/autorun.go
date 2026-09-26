@@ -10,6 +10,9 @@ import (
 
 const hashIDWhere = "hash_id = ?"
 
+// autorunStatusExpired 任务已过期（与 service.TaskStatus 的返回值 2 一致）
+const autorunStatusExpired = 2
+
 func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
 	records := make([]dbTable.AutorunRecord, 0)
 	q := GetDB().Model(&dbTable.AutorunRecord{})
@@ -23,6 +26,32 @@ func FetchAutorunRecords(hashid string) ([]dbTable.AutorunRecord, error) {
 func DeleteAutorunRecord(hashid string) (int64, error) {
 	resp := GetDB().Where(hashIDWhere, hashid).Delete(&dbTable.AutorunRecord{})
 	return resp.RowsAffected, resp.Error
+}
+
+// DeleteExpiredAutorunRecords 删除「已过期且未停用」的自动任务，
+// 返回删除数量与被删记录涉及的作用域（供调用方广播刷新）。
+// 停用任务必须保留：用户停用往往只是「先留着，以后可能再用」，删掉就不是清理而是丢配置。
+// status 是派生缓存，删除前先按当前时间刷新一次，避免拿陈旧状态做判断。
+func DeleteExpiredAutorunRecords(today time.Time) (int64, []string, error) {
+	if _, err := RefreshAutorunStatuses(today); err != nil {
+		return 0, nil, err
+	}
+	expired := make([]dbTable.AutorunRecord, 0)
+	if err := GetDB().Where("disabled = ? AND status = ?", false, autorunStatusExpired).
+		Find(&expired).Error; err != nil {
+		return 0, nil, err
+	}
+	if len(expired) == 0 {
+		return 0, nil, nil
+	}
+	ids := make([]string, 0, len(expired))
+	scopes := make([]string, 0, len(expired))
+	for _, record := range expired {
+		ids = append(ids, record.HashID)
+		scopes = append(scopes, record.Scope...)
+	}
+	resp := GetDB().Where("hash_id IN ?", ids).Delete(&dbTable.AutorunRecord{})
+	return resp.RowsAffected, scopes, resp.Error
 }
 
 func UpsertAutorunRecord(record *dbTable.AutorunRecord) error {

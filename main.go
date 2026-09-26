@@ -49,6 +49,12 @@ func buildRouter() *gin.Engine {
 	router.POST("/web/auth/login", web.Login)
 
 	// JWT 认证路由组
+	// 请求驱动的自动任务清理：按间隔顺带在后台清理已过期任务，不阻塞请求
+	router.Use(func(c *gin.Context) {
+		startup.MaybeCleanExpiredAutorun()
+		c.Next()
+	})
+
 	jwtAuth := router.Group("/", middleware.JWTAuthMiddleware())
 
 	// 用户信息与改密（需 JWT）
@@ -126,6 +132,7 @@ func buildRouter() *gin.Engine {
 	router.GET("/web/autorun", web.GetAutorunStatus)
 	router.GET("/web/autorun/hash/:hashid", web.GetAutorunHashStatus)
 	secureWrite.DELETE("/web/autorun/:hashid", web.DeleteAutorunRecord)
+	secureWrite.DELETE("/web/autorun/expired", web.DeleteExpiredAutorunRecords)
 	secureWrite.PUT("/web/autorun/compensation", web.PutCompensationRule)
 	secureWrite.PUT("/web/autorun/timetable", web.PutTimetableRule)
 	secureWrite.PUT("/web/autorun/schedule", web.PutScheduleRule)

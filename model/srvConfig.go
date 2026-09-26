@@ -12,6 +12,7 @@ type SrvConfig struct {
 	Db     DbConfig     `mapstructure:"db"`
 	Log    LogConfig    `mapstructure:"log"`
 	Run    RunConfig    `mapstructure:"run"`
+	Autorun    AutorunConfig    `mapstructure:"autorun"`
 }
 
 type APIKeyConfig struct {
@@ -53,6 +54,12 @@ type LogConfig struct {
 
 type RunConfig struct {
 	Serverless bool `mapstructure:"serverless"`
+}
+
+// AutorunConfig 自动任务的维护策略
+type AutorunConfig struct {
+	// AutoClean 自动清理已过期的自动任务：启动时以及运行期间按间隔（24 小时）顺带清理
+	AutoClean bool `mapstructure:"auto_clean"`
 }
 
 func (c SrvConfig) WebSocketEnabled() bool {
