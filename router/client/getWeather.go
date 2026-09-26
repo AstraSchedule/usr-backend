@@ -144,50 +144,54 @@ func generateQWeatherJWT(cfg model.JWTAuthConfig) (string, error) {
 	return signingInput + "." + signatureEncoded, nil
 }
 
-// buildCityLookupURL 构建城市查询 URL
+// buildCityLookupURL 拼和风城市查询 URL（参数经 url.Values 编码，防 query 注入）
 func buildCityLookupURL(name, adm, host string) string {
+	query := url.Values{}
+	query.Set("location", name)
 	if adm != "" {
-		return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s&adm=%s", host, url.QueryEscape(name), url.QueryEscape(adm))
+		query.Set("adm", adm)
 	}
-	return fmt.Sprintf("https://%s/geo/v2/city/lookup?location=%s", host, url.QueryEscape(name))
+	return "https://" + host + "/geo/v2/city/lookup?" + query.Encode()
 }
 
-// parseLocationResult 解析城市查询结果
-func parseLocationResult(result map[string]interface{}) (*model.LocationResp, error) {
+// parseCityLookupResponse 从和风响应里取出第一个城市的坐标与名称；
+// 返回 (nil, nil) 表示响应结构合法但没有可用城市。
+func parseCityLookupResponse(body []byte) (*model.LocationResp, error) {
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("解析JSON响应失败: %w", err)
+	}
+	if code, ok := result["code"].(string); !ok || code != "200" {
+		return nil, fmt.Errorf("API返回错误码: %v", result["code"])
+	}
 	results, ok := result["location"].([]interface{})
 	if !ok || len(results) == 0 {
-		return nil, fmt.Errorf("未找到城市信息")
+		return nil, nil
 	}
-
 	location, ok := results[0].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("城市信息格式错误")
+		return nil, nil
 	}
-
 	id, idOk := location["id"].(string)
 	latStr, latOk := location["lat"].(string)
 	lonStr, lonOk := location["lon"].(string)
-	name, nameOk := location["name"].(string)
-
+	cityName, nameOk := location["name"].(string)
 	if !idOk || !latOk || !lonOk || !nameOk {
-		return nil, fmt.Errorf("城市信息字段缺失")
+		return nil, nil
 	}
-
 	lat, err1 := strconv.ParseFloat(latStr, 64)
 	lon, err2 := strconv.ParseFloat(lonStr, 64)
 	if err1 != nil || err2 != nil {
-		return nil, fmt.Errorf("经纬度解析失败")
+		return nil, nil
 	}
-
-	return &model.LocationResp{ID: id, Lat: lat, Lon: lon, Name: name}, nil
+	return &model.LocationResp{ID: id, Lat: lat, Lon: lon, Name: cityName}, nil
 }
 
-// cityLookup 查询城市位置信息
 func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.LocationResp, error) {
 	if name == "" {
 		return nil, fmt.Errorf("城市名不能为空")
 	}
-
+	// 检查缓存
 	cacheKey := fmt.Sprintf("%s_%s", name, adm)
 	if cachedValue, ok := cache.Load(cacheKey); ok {
 		cachedLoc := cachedValue.(*model.LocationResp)
@@ -196,35 +200,27 @@ func cityLookup(name, adm, host string, cfg model.APIKeyConfig) (*model.Location
 		return cachedLoc, nil
 	}
 
-	url := buildCityLookupURL(name, adm, host)
-	client := newRestyClient()
-	req, err := createQWeatherRequest(client, cfg)
+	urlStr := buildCityLookupURL(name, adm, host)
+	req, err := createQWeatherRequest(newRestyClient(), cfg)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := req.Get(url)
+	resp, err := req.Get(urlStr)
 	if err != nil {
 		return nil, fmt.Errorf("请求API失败: %w", err)
 	}
 	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d\n%s", url, resp.StatusCode(), resp.String())
+		return nil, fmt.Errorf("API (%s) 请求失败，状态码: %d\n%s", urlStr, resp.StatusCode(), resp.String())
 	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(resp.Body(), &result); err != nil {
-		return nil, fmt.Errorf("解析JSON响应失败: %w", err)
-	}
-	if code, ok := result["code"].(string); !ok || code != "200" {
-		return nil, fmt.Errorf("API返回错误码: %v", result["code"])
-	}
-
-	locationResult, err := parseLocationResult(result)
+	location, err := parseCityLookupResponse(resp.Body())
 	if err != nil {
-		return nil, fmt.Errorf("未找到城市信息 (%s): %w", url, err)
+		return nil, err
 	}
-
-	cache.Store(cacheKey, locationResult)
-	return locationResult, nil
+	if location == nil {
+		return nil, fmt.Errorf("未找到城市信息 (%s)", urlStr)
+	}
+	cache.Store(cacheKey, location)
+	return location, nil
 }
 
 // weatherLookup 查询指定位置的天气信息

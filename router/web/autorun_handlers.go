@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -569,7 +570,9 @@ func DeleteAutorunRecord(c *gin.Context) {
 	if rows, err := db.FetchAutorunRecordsNs(ns, hashid); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	affected, err := db.DeleteAutorunRecordNs(ns, hashid)
+	affected, err := deleteWithVersionBump(ns, scopes, func(tx *gorm.DB) (int64, error) {
+		return db.DeleteAutorunRecordNsTx(tx, ns, hashid)
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
