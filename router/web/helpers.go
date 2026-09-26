@@ -287,7 +287,7 @@ func bumpDataVersionForDeletedScopes(scopes []string) {
 			continue
 		}
 		bumped[key] = struct{}{}
-		if err := db.BumpDataVersion(school, grade, class, now); err != nil {
+		if err := db.BumpDataVersion(db.GetDB(), school, grade, class, now); err != nil {
 			logrus.Warnf("推进数据版本失败（删除后缓存可能滞后）: scope=%q err=%v", raw, err)
 		}
 	}
