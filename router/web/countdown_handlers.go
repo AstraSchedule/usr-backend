@@ -197,17 +197,28 @@ func DeleteCountdownRecord(c *gin.Context) {
 	if rows, err := db.FetchCountdownRecords(id); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	affected, err := db.DeleteCountdownRecord(id)
+	// 与自动任务同理：删除与版本推进同事务，避免缓存永久陈旧
+	tx := db.GetDB().Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	affected, err := db.DeleteCountdownRecordTx(tx, id)
 	if err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if affected == 0 {
+		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
 		return
 	}
-	// 与自动任务同理：记录消失后没有时间戳能反映变化，需显式推进版本
-	bumpDataVersionForDeletedScopes(scopes)
+	bumpDataVersionForDeletedScopes(tx, scopes)
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	broadcastScopes(scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": id})
 }

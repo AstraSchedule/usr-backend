@@ -4,6 +4,8 @@ import (
 	"AstraScheduleServerGo/model/dbTable"
 	"AstraScheduleServerGo/db"
 	"AstraScheduleServerGo/router/client"
+
+	"gorm.io/gorm"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -273,7 +275,7 @@ func broadcastScopes(scopes []string) int {
 // （DataVersion 的粒度是班级，粗作用域无法一一枚举到具体班级）。
 // 删除此时已经提交，版本推进失败无法回滚，因此只记录告警：让缓存多等一轮，
 // 也好过把一次已经生效的删除报成失败。
-func bumpDataVersionForDeletedScopes(scopes []string) {
+func bumpDataVersionForDeletedScopes(conn *gorm.DB, scopes []string) {
 	now := time.Now()
 	bumped := make(map[string]struct{})
 	for _, raw := range scopes {
@@ -287,7 +289,7 @@ func bumpDataVersionForDeletedScopes(scopes []string) {
 			continue
 		}
 		bumped[key] = struct{}{}
-		if err := db.BumpDataVersion(db.GetDB(), school, grade, class, now); err != nil {
+		if err := db.BumpDataVersion(conn, school, grade, class, now); err != nil {
 			logrus.Warnf("推进数据版本失败（删除后缓存可能滞后）: scope=%q err=%v", raw, err)
 		}
 	}

@@ -16,9 +16,24 @@ import (
 // 传空串表示「全局」：删除的作用域可能粗于单个班级（例如年级级自动任务），
 // 此时用一条全局版本行兜底，代价是同一命名空间内所有班级各回源一次——删除属低频操作。
 func BumpDataVersion(conn *gorm.DB, school, grade, class string, at time.Time) error {
-	row := dbTable.DataVersion{School: school, Grade: grade, Class: class, Version: at}
+	// 版本必须严格递增：LatestTimestamp 会截断到 Unix 秒，同一秒内的两次删除若拿到相同秒值，
+	// 客户端会继续命中 304、沿用已删除的配置。因此与现有版本比较后至少 +1 秒。
+	next := dateOnlySecond(at)
+	existing := dbTable.DataVersion{}
+	conn.Where(scopeClassWhere, school, grade, class).Take(&existing)
+	if !existing.Version.IsZero() {
+		if bumped := existing.Version.Add(time.Second); !next.After(bumped) {
+			next = bumped
+		}
+	}
+	row := dbTable.DataVersion{School: school, Grade: grade, Class: class, Version: next}
 	return conn.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "school"}, {Name: "grade"}, {Name: "class"}},
 		DoUpdates: clause.AssignmentColumns([]string{"version", "updated_at"}),
 	}).Create(&row).Error
+}
+
+// dateOnlySecond 截断到秒：版本比较走 LatestTimestamp（Unix 秒），纳秒不参与比较
+func dateOnlySecond(t time.Time) time.Time {
+	return time.Unix(t.Unix(), 0)
 }

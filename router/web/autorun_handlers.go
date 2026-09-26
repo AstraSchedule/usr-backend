@@ -537,18 +537,29 @@ func DeleteAutorunRecord(c *gin.Context) {
 	if rows, err := db.FetchAutorunRecords(hashid); err == nil && len(rows) > 0 {
 		scopes = rows[0].Scope
 	}
-	affected, err := db.DeleteAutorunRecord(hashid)
+	// 删除与版本推进放在同一事务：删除已生效而版本写入失败时，缓存会永久停留在旧版本
+	tx := db.GetDB().Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	affected, err := db.DeleteAutorunRecordTx(tx, hashid)
 	if err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if affected == 0 {
+		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
 		return
 	}
+	bumpDataVersionForDeletedScopes(tx, scopes)
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	_, _ = db.RefreshAutorunStatuses(time.Now())
-	// 记录连同 UpdatedAt 一起消失，需显式推进版本，否则 304 会让客户端继续沿用旧课表
-	bumpDataVersionForDeletedScopes(scopes)
 	broadcastScopes(scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
@@ -561,7 +572,7 @@ func DeleteExpiredAutorunRecords(c *gin.Context) {
 		return
 	}
 	if deleted > 0 {
-		bumpDataVersionForDeletedScopes(scopes)
+		// 版本推进已在 db 层的同一事务内完成
 		broadcastScopes(scopes)
 	}
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": deleted})
