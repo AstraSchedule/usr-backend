@@ -267,22 +267,5 @@ func mergeScopes(oldScopes, newScopes []string) []string {
 // broadcastScopes 在指定租户 namespace 内按作用域列表向在线客户端广播 SyncConfig
 // （仅 WebSocket 模式生效，serverless 自动跳过）。支持 ALL / school / school/grade 粒度；返回成功发送条数。
 func broadcastScopes(ns string, scopes []string) int {
-	total := 0
-	for _, raw := range scopes {
-		// 统一使用规范化后的 scope：整体与各分段都先 TrimSpace，避免 " ALL " / " s / g " 无法匹配
-		scope := strings.TrimSpace(raw)
-		parts := strings.Split(scope, "/")
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		switch {
-		case scope == "" || strings.EqualFold(scope, "ALL"):
-			total += client.BroadcastSyncAll(ns)
-		case len(parts) >= 2 && parts[0] != "" && parts[1] != "":
-			total += client.BroadcastSync(ns, parts[0], parts[1])
-		case len(parts) == 1 && parts[0] != "":
-			total += client.BroadcastSyncSchool(ns, parts[0])
-		}
-	}
-	return total
+	return client.BroadcastScopes(ns, scopes)
 }

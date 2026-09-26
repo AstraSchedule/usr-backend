@@ -12,6 +12,7 @@ func StartInit() {
 	ReadConfig()
 	SetLog()
 	MigrateDb()
+	StartAutorunCleaner()
 	// SaaS 模式不自动创建 default namespace，用户通过 Dashboard 管理
 }
 

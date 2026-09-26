@@ -37,3 +37,6 @@ debug = false
 
 [run]
 serverless = true  # 是否使用 Serverless 模式；true=关闭 WebSocket，false=开启 WebSocket
+
+[autorun]
+auto_clean = false  # 自动清理已过期的自动任务：启动时以及运行期间按间隔（24 小时）顺带清理

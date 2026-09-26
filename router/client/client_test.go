@@ -421,6 +421,11 @@ func doWeatherEdgeRequest(t *testing.T, router *gin.Engine, headers map[string]s
 
 func TestGetWeatherWithEdgeHeader_NoHeader(t *testing.T) {
 	ensureTestDB()
+	mock := setupMockWeatherServer(t)
+
+	origHost := model.Configs.APIKey.APIHost
+	model.Configs.APIKey.APIHost = strings.TrimPrefix(mock.URL, "https://")
+	t.Cleanup(func() { model.Configs.APIKey.APIHost = origHost })
 
 	router := setupTestRouter()
 	router.GET("/api/weather/", GetWeatherWithEdgeHeader)
