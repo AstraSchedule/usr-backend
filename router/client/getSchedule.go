@@ -73,7 +73,13 @@ func GetSchedule(c *gin.Context) {
 		service.LatestCountdownTimestamp(filteredCountdowns),
 	)
 	effectiveVersion := scheduleVersion(dataVersionTs, weekNumber, boundary)
-	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber && clientBoundary == boundary {
+	// 快照是「今天 + 后 6 天」的滑动窗口：服务端每次算出的到期时间都会随请求日期前移，
+	// 若用相等比较，版本串每天都会变，快照就退化成每天 200。分两种情形：
+	//   - 本次没有变化点（boundary==0，之后不会再变）：数据未变即可 304；
+	//   - 有变化点：只要求客户端手上的快照尚未过期（其边界仍晚于当前时刻）即可 304，
+	//     越过该时刻就必须重新生成快照。（与边缘 scheduleExpired 的判定保持一致）
+	boundaryUsable := boundary == 0 || clientBoundary > now.Unix()
+	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber && boundaryUsable {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
@@ -91,7 +97,10 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	resolvedDailyClasses := service.ApplyScheduleRulesCtx(
+	// 返回整周（今天 + 后 6 天）：今天那一格与单日入口完全一致，
+	// 其余 6 天按各自零点预先解析好，客户端按本地日期取用，
+	// 边缘的缓存有效期因此可以从「明天零点」推到第 7 天末。
+	resolvedDailyClasses := service.ApplyScheduleRulesCtxWeek(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
 		records,
@@ -110,12 +119,20 @@ func GetSchedule(c *gin.Context) {
 		ClassList []string `json:"classList"`
 		Timetable string   `json:"timetable"`
 	}
+	// 整周快照会跨到下一周，多周轮换必须按「那一天自己的周次」展开，
+	// 否则下周一的课程会被选中本周的轮换项。
+	todayIdx := int(now.Weekday())
 	flatDailyClasses := make([]dailyClassFlat, 7)
 	for i := range resolvedDailyClasses {
+		offset := (i - todayIdx + 7) % 7
+		dayWeekNumber := service.CalcWeekNumber(
+			timetable.TimetableConfig.Start,
+			now.AddDate(0, 0, offset),
+		)
 		flatDailyClasses[i] = dailyClassFlat{
 			Chinese:   resolvedDailyClasses[i].Chinese,
 			English:   resolvedDailyClasses[i].English,
-			ClassList: service.ResolveClassList(resolvedDailyClasses[i].ClassList, weekNumber),
+			ClassList: service.ResolveClassList(resolvedDailyClasses[i].ClassList, dayWeekNumber),
 			Timetable: resolvedDailyClasses[i].Timetable,
 		}
 	}

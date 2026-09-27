@@ -294,6 +294,34 @@ func ApplyScheduleRules(base [7]dbTable.DailyClass, timetable map[string]map[str
 // ApplyScheduleRulesCtx 按 COMPENSATION → TIMETABLE → (SCHEDULE + 调课) → ALL 的顺序叠加自动任务条目。
 // 其中「调课」与「课程表调整」在同一层按优先级混排。
 func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
+	return applyRulesForDay(base, timetable, records, school, grade, classNumber, ctx)
+}
+
+// ApplyScheduleRulesCtxWeek 返回整周 7 天各自解析后的课表。
+// 今天用真实时刻求值（客户端展示的就是今天，必须与单日入口完全一致），
+// 之后 6 天用各自零点求值——它们只是提前备好，客户端在那天到来时会按边界重新拉取，
+// 因此天内的 cron 细节不必在这里精确，边界仍由 VersionBoundary 兜住。
+// 这样边缘的缓存有效期可以从「明天零点」推到「第 7 天末」，省掉 6 次回源。
+func ApplyScheduleRulesCtxWeek(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
+	resolved := base
+	today := dateOnly(ctx.Now)
+	for d := 0; d < 7; d++ {
+		dayCtx := ctx
+		if d > 0 {
+			dayCtx.Now = today.AddDate(0, 0, d)
+		}
+		// 每一天都基于原始 base 解析：跨天调课会读取「对方那一天」的课程，
+		// 若把前一天的结果带进来，读到的可能已是被替换过的课程。
+		day := applyRulesForDay(base, timetable, records, school, grade, classNumber, dayCtx)
+		idx := weekdayIndex(dayCtx.Now)
+		resolved[idx] = day[idx]
+	}
+	return resolved
+}
+
+// applyRulesForDay 按 COMPENSATION → TIMETABLE → (SCHEDULE + 调课) → ALL 的顺序，
+// 把命中的条目叠加到 ctx.Now 所在的那一天上。
+func applyRulesForDay(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
 	resolved := base
 	todayIdx := weekdayIndex(ctx.Now)
 

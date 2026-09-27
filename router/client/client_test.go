@@ -40,6 +40,18 @@ func ensureTestDB() {
 	testDBInitialized = true
 }
 
+// fetchScheduleVersion 发起一次课表请求并返回响应里的版本串。
+// 多个版本断言用例共用同一套「请求 → 校验状态 → 反序列化」步骤。
+func fetchScheduleVersion(t *testing.T, router *gin.Engine, path string) string {
+	t.Helper()
+	w := doClientRequest(t, router, "GET", path)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	return version
+}
+
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -210,11 +222,7 @@ func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	w := doClientRequest(t, router, "GET", "/dyn/2024/1")
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	version, _ := resp["version"].(string)
+	version := fetchScheduleVersion(t, router, "/dyn/2024/1")
 	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在后续变化点时版本应带变化点")
 }
 
@@ -239,11 +247,7 @@ func TestGetSchedule_ExpiredRuleKeepsCache(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	w := doClientRequest(t, router, "GET", "/cached/2024/1")
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	version, _ := resp["version"].(string)
+	version := fetchScheduleVersion(t, router, "/cached/2024/1")
 	assert.Regexp(t, `^\d+:\d+$`, version, "过期规则不应产生变化点")
 
 	// 再请求一次仍然命中 304
@@ -665,11 +669,11 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	// 处理函数在请求开始时取 now，这里把请求前后的星期都视为合法：
-	// 避免断言时重新读时间在跨零点时抖动
+	// 处理函数在请求开始时取 now，断言里只比较请求当天；这里取请求前那一刻，
+	// 避免重新读时间在跨零点时抖动。整周解析后范围内 7 天都会被替换，
+	// 因此只需确认「当天」确实落在被替换的集合里。
 	before := time.Now().Weekday()
 	w := doClientRequest(t, router, "GET", "/autorun/2024/1")
-	after := time.Now().Weekday()
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
@@ -679,18 +683,20 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	assert.Contains(t, resp, "week_number")
 	assert.Equal(t, "2020-09-01", resp["term_start"])
 
-	// 日期范围条件命中：作息表替换只作用于「今天」对应的星期（与 v1 行为一致）
+	// 日期范围条件命中「整周」：服务端返回今天 + 后 6 天各自解析的结果，
+	// 该范围覆盖这 7 天，因此 7 格都应换成 exam 作息。
+	// 客户端只展示当天那一份，边缘缓存的有效期由第 7 天末兜底。
 	dailyClass, ok := resp["daily_class"].([]interface{})
 	require.True(t, ok)
 	require.Len(t, dailyClass, 7)
-	appliedDays := make([]int, 0, 2)
+	appliedDays := make([]int, 0, 7)
 	for idx, day := range dailyClass {
 		if day.(map[string]interface{})["timetable"] == "exam" {
 			appliedDays = append(appliedDays, idx)
 		}
 	}
-	require.Len(t, appliedDays, 1, "应恰好替换一天的作息表")
-	assert.Contains(t, []int{int(before), int(after)}, appliedDays[0], "被替换的应当是请求当天")
+	require.Len(t, appliedDays, 7, "范围内 7 天都应替换为 exam 作息")
+	assert.Contains(t, appliedDays, int(before), "请求当天必须在其中")
 
 	// 客户端配置规则只下发本班作用域命中的条目
 	rules, ok := resp["client_config_rules"].([]interface{})
@@ -703,3 +709,38 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, settings["isWindowAlwaysOnTop"])
 }
+// 快照有效期内应命中 304，越过快照边界后必须重新生成快照。
+// 服务端算出的到期时间会随请求日期前移，因此判定必须是「客户端边界是否仍晚于当前时刻」，
+// 而不是与本次算出的边界做相等比较——后者会让快照每天退化成 200。
+func TestGetSchedule_SnapshotBoundaryControlsRevalidation(t *testing.T) {
+	ensureTestDB()
+
+	now := time.Now()
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{School: "snap", Grade: "2024", Class: "1", Version: now})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "snap-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"snap"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: now.AddDate(0, 0, -1).Format("2006-01-02")},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	// 第一次：拿到完整响应与版本串
+	first := fetchScheduleVersion(t, router, "/snap/2024/1")
+
+	// 带上刚拿到的版本（其中含未来的边界）再请求 → 应命中 304
+	w := doClientRequest(t, router, "GET", "/snap/2024/1?version="+first)
+	assert.Equal(t, http.StatusNotModified, w.Code, "快照未过期应命中 304")
+
+	// 把边界换成已过去的时刻（模拟快照已过期）→ 必须重新生成
+	parts := strings.Split(first, ":")
+	require.Len(t, parts, 3)
+	stale := parts[0] + ":" + parts[1] + ":1"
+	w2 := doClientRequest(t, router, "GET", "/snap/2024/1?version="+stale)
+	assert.Equal(t, http.StatusOK, w2.Code, "快照过期必须重新生成")
+}
+
