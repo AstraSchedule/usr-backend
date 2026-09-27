@@ -269,9 +269,12 @@ func recordWithCondition(hashID string, etype int, scope []string, when *dbTable
 func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 
-	// 纯周次条件只在周切换时变化，而周次已经写进版本串 → 不产生变化点
+	// 周轮换：命中集合在周一零点翻转，必须产生变化点。
+	// 边缘只比较版本串，跨周时新旧版本串是一致的，若这里返回 0，
+	// 客户端带真实版本后边缘会一直 304，服务端没有机会修正 weekNumber。
+	// now = 2026-09-01（周二），下一个周一是 2026-09-07。
 	weekOnly := recordWithCondition("week", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
-	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 7, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
 
 	// 已过期的单日条件不会再变化：不应该永久破坏 304 缓存
 	expired := recordWithCondition("expired", dbTable.AutorunTypeTimetable, []string{"s"},
@@ -348,7 +351,9 @@ func TestVersionBoundary_WeeklyWithDateBounds(t *testing.T) {
 	withEnd := weeklyCondition(2, 0)
 	withEnd.EndDate = "2026-09-30"
 	endRecord := recordWithCondition("week-end", dbTable.AutorunTypeTimetable, []string{"s"}, withEnd)
-	assert.Equal(t, day(2026, time.October, 1, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
+	// 起点已过、只有终点：周轮换每周一零点仍会翻转，因此最近的变化点是下周一（09-07），
+	// 而不是一个多月后的终点——earliestUnix 取最小值，终点只在更早时才胜出。
+	assert.Equal(t, day(2026, time.September, 7, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
 }
 
 func TestVersionBoundary_MultipleRecordsTakesEarliest(t *testing.T) {

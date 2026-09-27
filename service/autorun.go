@@ -20,6 +20,13 @@ func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
+// nextWeekStart 返回下一个周一零点（本地时区）。CalcWeekNumber 按周一切分，
+// 因此「每 N 周轮换」条件的命中集合恰好在该时刻翻转。
+func nextWeekStart(now time.Time) time.Time {
+	daysSinceMonday := (int(now.Weekday()) + 6) % 7
+	return dateOnly(now).AddDate(0, 0, 7-daysSinceMonday)
+}
+
 func parseConditionDate(value string, location *time.Location) (time.Time, bool) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, false
@@ -266,7 +273,13 @@ func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	}
 	now := ctx.Now
 	location := now.Location()
-	candidates := make([]time.Time, 0, 4)
+	candidates := make([]time.Time, 0, 5)
+	// 周轮换：命中集合只在周一零点翻转。必须作为变化点交给边缘——
+	// 否则客户端带上真实版本后，边缘仅凭「版本串相等」就会一直 304，
+	// 跨周也不回源，服务端没有机会用新的 weekNumber 纠正。
+	if when.EveryWeeks > 0 {
+		candidates = append(candidates, nextWeekStart(now))
+	}
 	// 生效区间起点：起点之前条件恒不命中，星期零点与 cron 命中都不会改变命中结果，
 	// 因此只返回起始边界，不返回范围外的候选点
 	if start, ok := parseConditionDate(when.StartDate, location); ok && now.Before(start) {
