@@ -20,13 +20,6 @@ func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
-// nextWeekStart 返回下一个周一零点（本地时区）。CalcWeekNumber 按周一切分，
-// 因此「每 N 周轮换」条件的命中集合恰好在该时刻翻转。
-func nextWeekStart(now time.Time) time.Time {
-	daysSinceMonday := (int(now.Weekday()) + 6) % 7
-	return dateOnly(now).AddDate(0, 0, 7-daysSinceMonday)
-}
-
 func parseConditionDate(value string, location *time.Location) (time.Time, bool) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, false
@@ -259,43 +252,51 @@ func VersionBoundary(records []dbTable.AutorunRecord, school, grade, classNumber
 	return boundary
 }
 
-// entryNextBoundary 计算条目下一次改变命中结果的时刻；0 表示不会再变化。
-// 需要覆盖 MatchCondition 里所有会让命中结果翻转的时点：日期上下界、限定星期的每日零点、
-// cron 命中点与带 duration 的窗口结束点。
+// entryNextBoundary 计算条目下一次让「整周快照」失效的时刻；0 表示不会再变化。
+//
+// 课表按整周返回（今天 + 后 6 天，见 ApplyScheduleRulesCtxWeek），所以：
+//   - 按天求值的条件（单日 / 区间 / 限定星期 / 周轮换 / 时刻事件）在整周内都已算好，
+//     同一天之内不会再变，跨过第 7 天才需要重算 → 候选为「第 7 天末」；
+//   - cron 在一天之内仍会翻转，它的下一次命中点必须保留，届时客户端会重新拉取；
+//     客户端只展示当天那一份，因此重取时看到的一定是准的。
 // 已过终点或尚未到起点时短路返回：前者永久不再命中，后者只有起点会改变命中结果。
 func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	when := e.When
 	if when == nil {
 		return 0
 	}
-	if when.Kind == "" || when.Kind == dbTable.AutorunWhenDate {
-		return dateNextBoundary(when, ctx)
-	}
 	now := ctx.Now
 	location := now.Location()
-	candidates := make([]time.Time, 0, 5)
-	// 周轮换：命中集合只在周一零点翻转。必须作为变化点交给边缘——
-	// 否则客户端带上真实版本后，边缘仅凭「版本串相等」就会一直 304，
-	// 跨周也不回源，服务端没有机会用新的 weekNumber 纠正。
-	if when.EveryWeeks > 0 {
-		candidates = append(candidates, nextWeekStart(now))
-	}
-	// 生效区间起点：起点之前条件恒不命中，星期零点与 cron 命中都不会改变命中结果，
-	// 因此只返回起始边界，不返回范围外的候选点
+	// 起点未到：起点之前条件恒不命中，只有起点会改变命中结果
 	if start, ok := parseConditionDate(when.StartDate, location); ok && now.Before(start) {
 		return start.Unix()
 	}
-	// 生效区间终点：越过终点（含当天）后条件永久不命中，此后不会再产生变化点
-	if end, ok := parseConditionDate(when.EndDate, location); ok {
-		endExclusive := end.AddDate(0, 0, 1)
-		if !now.Before(endExclusive) {
+	end, hasEnd := parseConditionDate(when.EndDate, location)
+	if hasEnd && !now.Before(end.AddDate(0, 0, 1)) {
+		// 越过终点（含当天）后条件永久不命中，此后不会再产生变化点
+		return 0
+	}
+	candidates := make([]time.Time, 0, 4)
+	// 单日条件：只在当天命中，边界是「生效日零点」或「次日零点」，过期后永久不再命中
+	if when.Kind == "" || when.Kind == dbTable.AutorunWhenDate {
+		day, ok := parseConditionDate(when.Date, location)
+		if !ok {
 			return 0
 		}
-		candidates = append(candidates, endExclusive)
+		if now.Before(day) {
+			return day.Unix()
+		}
+		dayEnd := day.AddDate(0, 0, 1)
+		if !now.Before(dayEnd) {
+			return 0
+		}
+		candidates = append(candidates, dayEnd)
 	}
-	// 限定星期：命中集合每天零点切换一次
-	if len(when.Weekdays) > 0 {
-		candidates = append(candidates, dateOnly(now).AddDate(0, 0, 1))
+	// 快照只覆盖 7 天，跨过第 7 天末就必须重算
+	candidates = append(candidates, dateOnly(now).AddDate(0, 0, 7))
+	if hasEnd {
+		// 终点落在快照内：该条目从终点次日起不再命中，比第 7 天末更早
+		candidates = append(candidates, end.AddDate(0, 0, 1))
 	}
 	if when.Kind == dbTable.AutorunWhenCron {
 		candidates = append(candidates, cronBoundaries(when, now)...)
@@ -334,22 +335,6 @@ func earliestUnix(candidates []time.Time) int64 {
 		}
 	}
 	return earliest
-}
-
-// dateNextBoundary 单日条件：未来日期从当日零点开始生效，当天则到次日零点结束
-func dateNextBoundary(when *dbTable.AutorunCondition, ctx RuleContext) int64 {
-	day, ok := parseConditionDate(when.Date, ctx.Now.Location())
-	if !ok {
-		return 0
-	}
-	if ctx.Now.Before(day) {
-		return day.Unix()
-	}
-	end := day.AddDate(0, 0, 1)
-	if ctx.Now.Before(end) {
-		return end.Unix()
-	}
-	return 0
 }
 
 // EntryWindow 返回条目在时间轴上的生效区间（用于任务状态推导）。

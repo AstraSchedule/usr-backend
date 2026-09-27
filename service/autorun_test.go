@@ -269,12 +269,11 @@ func recordWithCondition(hashID string, etype int, scope []string, when *dbTable
 func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 
-	// 周轮换：命中集合在周一零点翻转，必须产生变化点。
-	// 边缘只比较版本串，跨周时新旧版本串是一致的，若这里返回 0，
-	// 客户端带真实版本后边缘会一直 304，服务端没有机会修正 weekNumber。
-	// now = 2026-09-01（周二），下一个周一是 2026-09-07。
+	// 课表按整周返回（今天 + 后 6 天），按天求值的条件在整周内都已算好：
+	// 周轮换只在跨周时变化，但快照只覆盖 7 天，跨过第 7 天末就必须重算。
+	// now = 2026-09-01，第 7 天末 = 2026-09-08 零点。
 	weekOnly := recordWithCondition("week", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
-	assert.Equal(t, day(2026, time.September, 7, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekOnly}, "s", "g", "c", now))
 
 	// 已过期的单日条件不会再变化：不应该永久破坏 304 缓存
 	expired := recordWithCondition("expired", dbTable.AutorunTypeTimetable, []string{"s"},
@@ -291,34 +290,35 @@ func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-20"})
 	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{future}, "s", "g", "c", now))
 
-	// 有终点的范围条件：终点次日零点失效；无终点则不产生变化点
+	// 有终点的范围条件：终点次日零点失效，但与第 7 天末取最早（此处第 7 天末更早）
 	ranged := recordWithCondition("range", dbTable.AutorunTypeTimetable, []string{"s"},
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-09-11"})
-	assert.Equal(t, day(2026, time.September, 12, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{ranged}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{ranged}, "s", "g", "c", now))
 
+	// 无终点的范围条件：长期生效，快照跨过第 7 天后必须重算
 	openEnded := recordWithCondition("open", dbTable.AutorunTypeTimetable, []string{"s"},
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01"})
-	assert.Equal(t, int64(0), VersionBoundary([]dbTable.AutorunRecord{openEnded}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{openEnded}, "s", "g", "c", now))
 
 	// cron：下一次命中的时刻
 	cronRecord := recordWithCondition("cron", dbTable.AutorunTypeTimetable, []string{"s"},
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *"})
 	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), VersionBoundary([]dbTable.AutorunRecord{cronRecord}, "s", "g", "c", now))
 
-	// 限定星期的周次条件：次日零点变化
+	// 限定星期的周次条件：每天的快照都已算好，同样由第 7 天末兜底
 	weekdayWeekly := recordWithCondition("weekday", dbTable.AutorunTypeTimetable, []string{"s"}, weeklyCondition(2, 0))
 	weekdayWeekly.Entries[0].When.Weekdays = []int{1}
-	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekdayWeekly}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{weekdayWeekly}, "s", "g", "c", now))
 }
 
-// 带 Weekdays 的范围条件：命中集合每天零点切换，边界必须是下一个零点而不是终点
+// 带 Weekdays 的范围条件：每天的命中结果都已算进快照，边界由第 7 天末兜底
 func TestVersionBoundary_RangeWithWeekdaysUsesNextMidnight(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 	when := &dbTable.AutorunCondition{
 		Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", EndDate: "2026-12-31", Weekdays: []int{3},
 	}
 	record := recordWithCondition("range-weekday", dbTable.AutorunTypeTimetable, []string{"s"}, when)
-	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{record}, "s", "g", "c", now))
 }
 
 // cron + duration：窗口内部的下一次状态切换是「窗口结束」，而不是下一次命中
@@ -351,9 +351,9 @@ func TestVersionBoundary_WeeklyWithDateBounds(t *testing.T) {
 	withEnd := weeklyCondition(2, 0)
 	withEnd.EndDate = "2026-09-30"
 	endRecord := recordWithCondition("week-end", dbTable.AutorunTypeTimetable, []string{"s"}, withEnd)
-	// 起点已过、只有终点：周轮换每周一零点仍会翻转，因此最近的变化点是下周一（09-07），
-	// 而不是一个多月后的终点——earliestUnix 取最小值，终点只在更早时才胜出。
-	assert.Equal(t, day(2026, time.September, 7, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
+	// 起点已过、终点在快照之外：边界就是第 7 天末（09-08），终点更晚所以不参与。
+	// earliestUnix 取最小值，终点只在更早时才胜出。
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{endRecord}, "s", "g", "c", now))
 }
 
 func TestVersionBoundary_MultipleRecordsTakesEarliest(t *testing.T) {
@@ -514,16 +514,47 @@ func TestVersionBoundary_FutureRangeReturnsStartBoundaryOnly(t *testing.T) {
 	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), boundaryOf(cronWhen, now), "起点之前的 cron 命中不是变化点")
 }
 
-// endDate 为空（不设终点）时行为不变
+// 不设终点时：长期生效的条件仍必须让快照在第 7 天末失效
 func TestVersionBoundary_OpenEndedUnchanged(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 
 	plain := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01"}
-	assert.Equal(t, int64(0), boundaryOf(plain, now), "无终点的范围条件不产生边界")
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), boundaryOf(plain, now), "无终点的范围条件由第 7 天末兜底")
 
 	weekday := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-08-01", Weekdays: []int{3}}
-	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), boundaryOf(weekday, now), "无终点时星期零点仍是边界")
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), boundaryOf(weekday, now), "每天的结果都已进快照，由第 7 天末兜底")
 
 	cronWhen := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *"}
 	assert.Equal(t, day(2026, time.September, 2, 8).Unix(), boundaryOf(cronWhen, now), "无终点时下一次命中仍是边界")
 }
+// ApplyScheduleRulesCtxWeek 应把 7 天各自解析好：今天与单日入口完全一致，
+// 后 6 天按各自零点求值。这样边缘缓存的有效期可以推到第 7 天末。
+func TestApplyScheduleRulesCtxWeek_ResolvesEachDay(t *testing.T) {
+	// 每两周轮换作息：第 1 周 exam、第 2 周暑期
+	timetable := baseTimetable()
+	timetable["暑期"] = map[string]interface{}{"09:00-10:00": 0}
+	record := dbTable.AutorunRecord{
+		HashID: "rotation", EType: dbTable.AutorunTypeTimetable, Scope: []string{"ALL"},
+		Entries: []dbTable.AutorunEntry{
+			{ID: "e1", When: weeklyCondition(2, 0), Action: map[string]interface{}{"timetableId": "exam"}},
+			{ID: "e2", When: weeklyCondition(2, 1), Action: map[string]interface{}{"timetableId": "暑期"}},
+		},
+	}
+	records := []dbTable.AutorunRecord{record}
+	ctx := RuleContext{Now: day(2026, time.September, 1, 8), TermStart: testTermStart} // 周二，第 1 周
+
+	week := ApplyScheduleRulesCtxWeek(baseSchedule(), timetable, records, "s", "g", "c", ctx)
+	// 今天那一格必须与单日入口完全一致，否则整周入口会悄悄改变现有行为
+	singleDay := ApplyScheduleRulesCtx(baseSchedule(), timetable, records, "s", "g", "c", ctx)
+	assert.Equal(t, singleDay[2], week[2], "今天应与单日入口一致")
+
+	// 09-01(周二) 起的 6 天仍属第 1 周 → exam；09-07(周一) 进入第 2 周 → 暑期
+	assert.Equal(t, "exam", week[2].Timetable, "09-01 周二")
+	assert.Equal(t, "exam", week[3].Timetable, "09-02 周三")
+	assert.Equal(t, "exam", week[4].Timetable, "09-03 周四")
+	assert.Equal(t, "exam", week[5].Timetable, "09-04 周五")
+	assert.Equal(t, "exam", week[6].Timetable, "09-05 周六")
+	assert.Equal(t, "exam", week[0].Timetable, "09-06 周日")
+	assert.Equal(t, "暑期", week[1].Timetable, "09-07 周一已进入第 2 周")
+}
+

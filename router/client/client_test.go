@@ -609,11 +609,11 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	// 处理函数在请求开始时取 now，这里把请求前后的星期都视为合法：
-	// 避免断言时重新读时间在跨零点时抖动
+	// 处理函数在请求开始时取 now，断言里只比较请求当天；这里取请求前那一刻，
+	// 避免重新读时间在跨零点时抖动。整周解析后范围内 7 天都会被替换，
+	// 因此只需确认「当天」确实落在被替换的集合里。
 	before := time.Now().Weekday()
 	w := doClientRequest(t, router, "GET", "/autorun/2024/1")
-	after := time.Now().Weekday()
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
@@ -623,18 +623,20 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	assert.Contains(t, resp, "week_number")
 	assert.Equal(t, "2020-09-01", resp["term_start"])
 
-	// 日期范围条件命中：作息表替换只作用于「今天」对应的星期（与 v1 行为一致）
+	// 日期范围条件命中「整周」：服务端返回今天 + 后 6 天各自解析的结果，
+	// 该范围覆盖这 7 天，因此 7 格都应换成 exam 作息。
+	// 客户端只展示当天那一份，边缘缓存的有效期由第 7 天末兜底。
 	dailyClass, ok := resp["daily_class"].([]interface{})
 	require.True(t, ok)
 	require.Len(t, dailyClass, 7)
-	appliedDays := make([]int, 0, 2)
+	appliedDays := make([]int, 0, 7)
 	for idx, day := range dailyClass {
 		if day.(map[string]interface{})["timetable"] == "exam" {
 			appliedDays = append(appliedDays, idx)
 		}
 	}
-	require.Len(t, appliedDays, 1, "应恰好替换一天的作息表")
-	assert.Contains(t, []int{int(before), int(after)}, appliedDays[0], "被替换的应当是请求当天")
+	require.Len(t, appliedDays, 7, "范围内 7 天都应替换为 exam 作息")
+	assert.Contains(t, appliedDays, int(before), "请求当天必须在其中")
 
 	// 客户端配置规则只下发本班作用域命中的条目
 	rules, ok := resp["client_config_rules"].([]interface{})

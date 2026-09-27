@@ -89,7 +89,10 @@ func GetSchedule(c *gin.Context) {
 			},
 		}
 	}
-	resolvedDailyClasses := service.ApplyScheduleRulesCtx(
+	// 返回整周（今天 + 后 6 天）：今天那一格与单日入口完全一致，
+	// 其余 6 天按各自零点预先解析好，客户端按本地日期取用，
+	// 边缘的缓存有效期因此可以从「明天零点」推到第 7 天末。
+	resolvedDailyClasses := service.ApplyScheduleRulesCtxWeek(
 		schedule.DailyClasses,
 		timetable.TimetableConfig.Timetable,
 		records,
