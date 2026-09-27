@@ -418,8 +418,9 @@ func TestCollectClientConfigRules_FiltersByScopeAndType(t *testing.T) {
 	assert.Equal(t, settings, rules[0].Settings)
 }
 
-func TestApplyScheduleRulesCtx_WeeklyTimetableRotation(t *testing.T) {
-	// Issue #57 核心场景：每两周轮换作息表，一条任务两条条目
+// weeklyRotationFixture 构造「每两周轮换作息」场景：第 1 周 exam、第 2 周暑期。
+// 两条用例（单日入口与整周入口）共用，避免重复的固定装置。
+func weeklyRotationFixture() (map[string]map[string]interface{}, []dbTable.AutorunRecord) {
 	timetable := baseTimetable()
 	timetable["暑期"] = map[string]interface{}{"09:00-10:00": 0}
 	record := dbTable.AutorunRecord{
@@ -429,7 +430,12 @@ func TestApplyScheduleRulesCtx_WeeklyTimetableRotation(t *testing.T) {
 			{ID: "e2", When: weeklyCondition(2, 1), Action: map[string]interface{}{"timetableId": "暑期"}},
 		},
 	}
-	records := []dbTable.AutorunRecord{record}
+	return timetable, []dbTable.AutorunRecord{record}
+}
+
+func TestApplyScheduleRulesCtx_WeeklyTimetableRotation(t *testing.T) {
+	// Issue #57 核心场景：每两周轮换作息表，一条任务两条条目
+	timetable, records := weeklyRotationFixture()
 
 	week1 := ApplyScheduleRulesCtx(baseSchedule(), timetable, records, "s", "g", "c",
 		RuleContext{Now: day(2026, time.September, 1, 8), TermStart: testTermStart})
@@ -531,16 +537,7 @@ func TestVersionBoundary_OpenEndedUnchanged(t *testing.T) {
 // 后 6 天按各自零点求值。这样边缘缓存的有效期可以推到第 7 天末。
 func TestApplyScheduleRulesCtxWeek_ResolvesEachDay(t *testing.T) {
 	// 每两周轮换作息：第 1 周 exam、第 2 周暑期
-	timetable := baseTimetable()
-	timetable["暑期"] = map[string]interface{}{"09:00-10:00": 0}
-	record := dbTable.AutorunRecord{
-		HashID: "rotation", EType: dbTable.AutorunTypeTimetable, Scope: []string{"ALL"},
-		Entries: []dbTable.AutorunEntry{
-			{ID: "e1", When: weeklyCondition(2, 0), Action: map[string]interface{}{"timetableId": "exam"}},
-			{ID: "e2", When: weeklyCondition(2, 1), Action: map[string]interface{}{"timetableId": "暑期"}},
-		},
-	}
-	records := []dbTable.AutorunRecord{record}
+	timetable, records := weeklyRotationFixture()
 	ctx := RuleContext{Now: day(2026, time.September, 1, 8), TermStart: testTermStart} // 周二，第 1 周
 
 	week := ApplyScheduleRulesCtxWeek(baseSchedule(), timetable, records, "s", "g", "c", ctx)

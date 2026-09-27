@@ -40,6 +40,18 @@ func ensureTestDB() {
 	testDBInitialized = true
 }
 
+// fetchScheduleVersion 发起一次课表请求并返回响应里的版本串。
+// 多个版本断言用例共用同一套「请求 → 校验状态 → 反序列化」步骤。
+func fetchScheduleVersion(t *testing.T, router *gin.Engine, path string) string {
+	t.Helper()
+	w := doClientRequest(t, router, "GET", path)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	version, _ := resp["version"].(string)
+	return version
+}
+
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -211,11 +223,7 @@ func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	w := doClientRequest(t, router, "GET", "/dyn/2024/1")
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	version, _ := resp["version"].(string)
+	version := fetchScheduleVersion(t, router, "/dyn/2024/1")
 	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在后续变化点时版本应带变化点")
 }
 
@@ -240,11 +248,7 @@ func TestGetSchedule_ExpiredRuleKeepsCache(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
-	w := doClientRequest(t, router, "GET", "/cached/2024/1")
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	version, _ := resp["version"].(string)
+	version := fetchScheduleVersion(t, router, "/cached/2024/1")
 	assert.Regexp(t, `^\d+:\d+$`, version, "过期规则不应产生变化点")
 
 	// 再请求一次仍然命中 304
