@@ -268,8 +268,10 @@ func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 	now := ctx.Now
 	start, end, hasStart, hasEnd := conditionDates(when, now.Location())
 	if hasStart && now.Before(start) {
-		// 起点未到：起点之前条件恒不命中，只有起点会改变命中结果
-		return start.Unix()
+		// 起点未到：起点之前条件恒不命中。但快照只覆盖 7 天，
+		// 若起点在快照之外，到期时间必须限制在快照内——否则版本会永久停在起点，
+		// 而当快照范围终于包含起点时，版本却仍然相同，客户端拿不到新配置。
+		return earliestUnix([]time.Time{start, dateOnly(now).AddDate(0, 0, 7)})
 	}
 	if hasEnd && !now.Before(end) {
 		// 越过终点（单日条件即次日）后条件永久不命中

@@ -303,12 +303,18 @@ func ApplyScheduleRulesCtx(base [7]dbTable.DailyClass, timetable map[string]map[
 // 因此天内的 cron 细节不必在这里精确，边界仍由 VersionBoundary 兜住。
 // 这样边缘的缓存有效期可以从「明天零点」推到「第 7 天末」，省掉 6 次回源。
 func ApplyScheduleRulesCtxWeek(base [7]dbTable.DailyClass, timetable map[string]map[string]interface{}, records []dbTable.AutorunRecord, school, grade, classNumber string, ctx RuleContext) [7]dbTable.DailyClass {
-	resolved := applyRulesForDay(base, timetable, records, school, grade, classNumber, ctx)
+	resolved := base
 	today := dateOnly(ctx.Now)
-	for d := 1; d < 7; d++ {
+	for d := 0; d < 7; d++ {
 		dayCtx := ctx
-		dayCtx.Now = today.AddDate(0, 0, d)
-		resolved = applyRulesForDay(resolved, timetable, records, school, grade, classNumber, dayCtx)
+		if d > 0 {
+			dayCtx.Now = today.AddDate(0, 0, d)
+		}
+		// 每一天都基于原始 base 解析：跨天调课会读取「对方那一天」的课程，
+		// 若把前一天的结果带进来，读到的可能已是被替换过的课程。
+		day := applyRulesForDay(base, timetable, records, school, grade, classNumber, dayCtx)
+		idx := weekdayIndex(dayCtx.Now)
+		resolved[idx] = day[idx]
 	}
 	return resolved
 }

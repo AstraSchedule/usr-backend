@@ -653,3 +653,38 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, settings["isWindowAlwaysOnTop"])
 }
+// 快照有效期内应命中 304，越过快照边界后必须重新生成快照。
+// 服务端算出的到期时间会随请求日期前移，因此判定必须是「客户端边界是否仍晚于当前时刻」，
+// 而不是与本次算出的边界做相等比较——后者会让快照每天退化成 200。
+func TestGetSchedule_SnapshotBoundaryControlsRevalidation(t *testing.T) {
+	ensureTestDB()
+
+	now := time.Now()
+	database := db.GetDB()
+	database.Save(&dbTable.DataVersion{School: "snap", Grade: "2024", Class: "1", Version: now})
+	database.Save(&dbTable.AutorunRecord{
+		HashID: "snap-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"snap"}, Level: 1,
+		Entries: []dbTable.AutorunEntry{{
+			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: now.AddDate(0, 0, -1).Format("2006-01-02")},
+			Action: map[string]interface{}{"timetableId": "exam"},
+		}},
+	})
+
+	router := setupTestRouter()
+	router.GET("/:school/:grade/:class", GetSchedule)
+
+	// 第一次：拿到完整响应与版本串
+	first := fetchScheduleVersion(t, router, "/snap/2024/1")
+
+	// 带上刚拿到的版本（其中含未来的边界）再请求 → 应命中 304
+	w := doClientRequest(t, router, "GET", "/snap/2024/1?version="+first)
+	assert.Equal(t, http.StatusNotModified, w.Code, "快照未过期应命中 304")
+
+	// 把边界换成已过去的时刻（模拟快照已过期）→ 必须重新生成
+	parts := strings.Split(first, ":")
+	require.Len(t, parts, 3)
+	stale := parts[0] + ":" + parts[1] + ":1"
+	w2 := doClientRequest(t, router, "GET", "/snap/2024/1?version="+stale)
+	assert.Equal(t, http.StatusOK, w2.Code, "快照过期必须重新生成")
+}
+

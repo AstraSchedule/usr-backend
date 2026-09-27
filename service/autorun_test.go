@@ -285,10 +285,11 @@ func TestVersionBoundary_NextTransitionOnly(t *testing.T) {
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-01"})
 	assert.Equal(t, day(2026, time.September, 2, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{today}, "s", "g", "c", now))
 
-	// 未来的单日条件：到生效日零点才变化
+	// 未来的单日条件：生效日在快照之外时，边界收敛到快照到期（第 7 天末），
+	// 这样快照范围终于包含它的那一刻版本会变，客户端能拿到新配置。
 	future := recordWithCondition("future", dbTable.AutorunTypeTimetable, []string{"s"},
 		&dbTable.AutorunCondition{Kind: dbTable.AutorunWhenDate, Date: "2026-09-20"})
-	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{future}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{future}, "s", "g", "c", now))
 
 	// 有终点的范围条件：终点次日零点失效，但与第 7 天末取最早（此处第 7 天末更早）
 	ranged := recordWithCondition("range", dbTable.AutorunTypeTimetable, []string{"s"},
@@ -343,10 +344,11 @@ func TestVersionBoundary_CronWithDurationUsesWindowEnd(t *testing.T) {
 func TestVersionBoundary_WeeklyWithDateBounds(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
 
+	// 起点在快照之外：边界同样收敛到快照到期，避免版本永久停在起点
 	withFutureStart := weeklyCondition(2, 0)
 	withFutureStart.StartDate = "2026-09-20"
 	startRecord := recordWithCondition("week-start", dbTable.AutorunTypeTimetable, []string{"s"}, withFutureStart)
-	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{startRecord}, "s", "g", "c", now))
+	assert.Equal(t, day(2026, time.September, 8, 0).Unix(), VersionBoundary([]dbTable.AutorunRecord{startRecord}, "s", "g", "c", now))
 
 	withEnd := weeklyCondition(2, 0)
 	withEnd.EndDate = "2026-09-30"
@@ -509,15 +511,21 @@ func TestVersionBoundary_ExpiredRangeHasNoBoundary(t *testing.T) {
 	assert.Equal(t, int64(0), boundaryOf(active, day(2026, time.September, 12, 0)))
 }
 
-// 尚未开始的范围条件只返回起始边界，不返回范围外的星期零点或 cron 命中点
-func TestVersionBoundary_FutureRangeReturnsStartBoundaryOnly(t *testing.T) {
+// 尚未开始的范围条件：起点在快照之外时，边界必须限制在快照到期之内，
+// 否则版本会永久停在起点；而当快照范围终于包含起点时版本却仍然相同，客户端拿不到新配置。
+func TestVersionBoundary_FutureRangeClampedToSnapshot(t *testing.T) {
 	now := day(2026, time.September, 1, 10)
+	snapshotEnd := day(2026, time.September, 8, 0).Unix() // 第 7 天末
 
 	weekday := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-09-20", EndDate: "2026-09-30", Weekdays: []int{1}}
-	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), boundaryOf(weekday, now), "起点之前的星期零点不是变化点")
+	assert.Equal(t, snapshotEnd, boundaryOf(weekday, now), "起点在快照之外，边界收敛到快照到期")
 
 	cronWhen := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenCron, Cron: "0 8 * * *", StartDate: "2026-09-20", EndDate: "2026-09-30"}
-	assert.Equal(t, day(2026, time.September, 20, 0).Unix(), boundaryOf(cronWhen, now), "起点之前的 cron 命中不是变化点")
+	assert.Equal(t, snapshotEnd, boundaryOf(cronWhen, now), "起点在快照之外，cron 命中不越过快照")
+
+	// 起点落在快照之内时，起点更早，仍应由起点充当边界
+	inWindow := &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: "2026-09-03", EndDate: "2026-09-30"}
+	assert.Equal(t, day(2026, time.September, 3, 0).Unix(), boundaryOf(inWindow, now), "快照内的起点更早，取起点")
 }
 
 // 不设终点时：长期生效的条件仍必须让快照在第 7 天末失效
