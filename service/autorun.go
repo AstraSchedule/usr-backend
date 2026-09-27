@@ -266,37 +266,21 @@ func entryNextBoundary(e dbTable.AutorunEntry, ctx RuleContext) int64 {
 		return 0
 	}
 	now := ctx.Now
-	location := now.Location()
-	// 起点未到：起点之前条件恒不命中，只有起点会改变命中结果
-	if start, ok := parseConditionDate(when.StartDate, location); ok && now.Before(start) {
+	start, end, hasStart, hasEnd := conditionDates(when, now.Location())
+	if hasStart && now.Before(start) {
+		// 起点未到：起点之前条件恒不命中，只有起点会改变命中结果
 		return start.Unix()
 	}
-	end, hasEnd := parseConditionDate(when.EndDate, location)
-	if hasEnd && !now.Before(end.AddDate(0, 0, 1)) {
-		// 越过终点（含当天）后条件永久不命中，此后不会再产生变化点
+	if hasEnd && !now.Before(end) {
+		// 越过终点（单日条件即次日）后条件永久不命中
 		return 0
 	}
-	candidates := make([]time.Time, 0, 4)
-	// 单日条件：只在当天命中，边界是「生效日零点」或「次日零点」，过期后永久不再命中
-	if when.Kind == "" || when.Kind == dbTable.AutorunWhenDate {
-		day, ok := parseConditionDate(when.Date, location)
-		if !ok {
-			return 0
-		}
-		if now.Before(day) {
-			return day.Unix()
-		}
-		dayEnd := day.AddDate(0, 0, 1)
-		if !now.Before(dayEnd) {
-			return 0
-		}
-		candidates = append(candidates, dayEnd)
-	}
+	candidates := make([]time.Time, 0, 3)
 	// 快照只覆盖 7 天，跨过第 7 天末就必须重算
 	candidates = append(candidates, dateOnly(now).AddDate(0, 0, 7))
 	if hasEnd {
 		// 终点落在快照内：该条目从终点次日起不再命中，比第 7 天末更早
-		candidates = append(candidates, end.AddDate(0, 0, 1))
+		candidates = append(candidates, end)
 	}
 	if when.Kind == dbTable.AutorunWhenCron {
 		candidates = append(candidates, cronBoundaries(when, now)...)
@@ -340,27 +324,30 @@ func earliestUnix(candidates []time.Time) int64 {
 // EntryWindow 返回条目在时间轴上的生效区间（用于任务状态推导）。
 // start/end 为半开区间；hasStart/hasEnd 为 false 表示该侧不设界（长期生效）。
 func EntryWindow(e dbTable.AutorunEntry, ctx RuleContext) (start, end time.Time, hasStart, hasEnd bool) {
-	when := e.When
-	if when == nil {
+	if e.When == nil {
 		return time.Time{}, time.Time{}, false, false
 	}
-	location := ctx.Now.Location()
-	switch when.Kind {
-	case "", dbTable.AutorunWhenDate:
+	return conditionDates(e.When, ctx.Now.Location())
+}
+
+// conditionDates 把条件里的日期字段解析成统一的半开区间：
+// 单日条件为 [当天, 次日)，其余为 [startDate, endDate+1)，缺省的那一侧 hasXxx=false。
+// 条目生效区间推导与变化点计算都依赖这层归一化。
+func conditionDates(when *dbTable.AutorunCondition, location *time.Location) (start, end time.Time, hasStart, hasEnd bool) {
+	if when.Kind == "" || when.Kind == dbTable.AutorunWhenDate {
 		day, ok := parseConditionDate(when.Date, location)
 		if !ok {
 			return time.Time{}, time.Time{}, false, false
 		}
 		return day, day.AddDate(0, 0, 1), true, true
-	default:
-		if s, ok := parseConditionDate(when.StartDate, location); ok {
-			start, hasStart = s, true
-		}
-		if en, ok := parseConditionDate(when.EndDate, location); ok {
-			end, hasEnd = en.AddDate(0, 0, 1), true
-		}
-		return start, end, hasStart, hasEnd
 	}
+	if s, ok := parseConditionDate(when.StartDate, location); ok {
+		start, hasStart = s, true
+	}
+	if en, ok := parseConditionDate(when.EndDate, location); ok {
+		end, hasEnd = en.AddDate(0, 0, 1), true
+	}
+	return start, end, hasStart, hasEnd
 }
 
 // EnabledEntriesOf 返回启用中的条目（停用条目不参与解析与状态推导）
