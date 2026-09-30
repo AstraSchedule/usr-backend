@@ -182,28 +182,35 @@ func TestScheduleVersionChangesAcrossWeeks(t *testing.T) {
 	dataVersion := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Unix()
 	assert.NotEqual(t, scheduleVersion(dataVersion, 1, 0), scheduleVersion(dataVersion, 2, 0))
 	assert.NotEqual(t, scheduleVersion(100, 2, 0), scheduleVersion(101, 1, 0))
-	// 变化点（下一次配置变更时刻）同样参与版本比较
+	// 变化点仍写进版本串（边缘缓存据此决定何时重新取快照），但不再参与服务端判定
 	assert.NotEqual(t, scheduleVersion(100, 2, 1000), scheduleVersion(100, 2, 2000))
 
-	parsedDataVersion, parsedWeekNumber, parsedBoundary, err := parseScheduleVersion(scheduleVersion(100, 2, 0))
+	parsedDataVersion, parsedWeekNumber, err := parseScheduleVersion(scheduleVersion(100, 2, 0))
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), parsedDataVersion)
 	assert.Equal(t, 2, parsedWeekNumber)
-	assert.Equal(t, int64(0), parsedBoundary)
 
-	_, _, parsedBoundary, err = parseScheduleVersion(scheduleVersion(100, 2, 42))
-	assert.NoError(t, err)
-	assert.Equal(t, int64(42), parsedBoundary)
+	// 第三段被忽略：带变化点、带非法变化点、带多余段都算合法版本（客户端可以不携带它）
+	for _, v := range []string{scheduleVersion(100, 2, 42), "100:2:not-a-number", "100:2", "100:2:3:4"} {
+		d, w, err := parseScheduleVersion(v)
+		assert.NoError(t, err, v)
+		assert.Equal(t, int64(100), d, v)
+		assert.Equal(t, 2, w, v)
+	}
 
-	_, _, _, err = parseScheduleVersion("1:2:3:4")
+	// 数据版本与教学周仍然必须是合法值
+	_, _, err = parseScheduleVersion("1:not-a-number")
 	assert.Error(t, err)
-	_, _, _, err = parseScheduleVersion("1:2:not-a-number")
+	_, _, err = parseScheduleVersion("not-a-number:2")
+	assert.Error(t, err)
+	_, _, err = parseScheduleVersion("100:0")
 	assert.Error(t, err)
 }
 
-// 有后续变化点的自动任务（这里用「明天生效的单日调休」）会把变化点写进版本，
-// 客户端越过该时刻后版本必然不同，从而在周内拿到新配置而不是一直吃 304。
-func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
+// 变化点不参与 304 判定：客户端不携带第三段、或携带的第三段已过期/格式不同，只要数据版本与
+// 教学周一致就仍然命中 304。这就是「第三段可以不携带」的验收条件。
+// （数据变化后必须重新下发由 TestGetSchedule_VersionFollowsDataUpdates 覆盖。）
+func TestGetSchedule_IgnoresBoundaryInClientVersion(t *testing.T) {
 	ensureTestDB()
 
 	now := time.Now()
@@ -225,6 +232,18 @@ func TestGetSchedule_BoundaryInvalidatesCache(t *testing.T) {
 
 	version := fetchScheduleVersion(t, router, "/dyn/2024/1")
 	assert.Regexp(t, `^\d+:\d+:\d+$`, version, "存在后续变化点时版本应带变化点")
+	parts := strings.Split(version, ":")
+	dataVersion, weekNumber := parts[0], parts[1]
+
+	// 不携带第三段：客户端可以省略它
+	withoutBoundary := doClientRequest(t, router, "GET", "/dyn/2024/1?version="+dataVersion+":"+weekNumber)
+	assert.Equal(t, http.StatusNotModified, withoutBoundary.Code, "第三段可以不携带")
+
+	// 携带已过期或格式不同的第三段：同样命中 304（不再按整串比较）
+	for _, boundary := range []string{"1", "0", "not-a-number"} {
+		w := doClientRequest(t, router, "GET", "/dyn/2024/1?version="+dataVersion+":"+weekNumber+":"+boundary)
+		assert.Equal(t, http.StatusNotModified, w.Code, boundary)
+	}
 }
 
 // 已过期的单日规则不会再改变课表：版本里不应出现变化点，否则历史任务会永久破坏 304 缓存
@@ -652,39 +671,5 @@ func TestGetSchedule_ClientConfigRulesAndRangeRule(t *testing.T) {
 	settings, ok := rule["settings"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, true, settings["isWindowAlwaysOnTop"])
-}
-// 快照有效期内应命中 304，越过快照边界后必须重新生成快照。
-// 服务端算出的到期时间会随请求日期前移，因此判定必须是「客户端边界是否仍晚于当前时刻」，
-// 而不是与本次算出的边界做相等比较——后者会让快照每天退化成 200。
-func TestGetSchedule_SnapshotBoundaryControlsRevalidation(t *testing.T) {
-	ensureTestDB()
-
-	now := time.Now()
-	database := db.GetDB()
-	database.Save(&dbTable.DataVersion{School: "snap", Grade: "2024", Class: "1", Version: now})
-	database.Save(&dbTable.AutorunRecord{
-		HashID: "snap-rule", EType: dbTable.AutorunTypeTimetable, Scope: []string{"snap"}, Level: 1,
-		Entries: []dbTable.AutorunEntry{{
-			ID: "e1", When: &dbTable.AutorunCondition{Kind: dbTable.AutorunWhenRange, StartDate: now.AddDate(0, 0, -1).Format("2006-01-02")},
-			Action: map[string]interface{}{"timetableId": "exam"},
-		}},
-	})
-
-	router := setupTestRouter()
-	router.GET("/:school/:grade/:class", GetSchedule)
-
-	// 第一次：拿到完整响应与版本串
-	first := fetchScheduleVersion(t, router, "/snap/2024/1")
-
-	// 带上刚拿到的版本（其中含未来的边界）再请求 → 应命中 304
-	w := doClientRequest(t, router, "GET", "/snap/2024/1?version="+first)
-	assert.Equal(t, http.StatusNotModified, w.Code, "快照未过期应命中 304")
-
-	// 把边界换成已过去的时刻（模拟快照已过期）→ 必须重新生成
-	parts := strings.Split(first, ":")
-	require.Len(t, parts, 3)
-	stale := parts[0] + ":" + parts[1] + ":1"
-	w2 := doClientRequest(t, router, "GET", "/snap/2024/1?version="+stale)
-	assert.Equal(t, http.StatusOK, w2.Code, "快照过期必须重新生成")
 }
 

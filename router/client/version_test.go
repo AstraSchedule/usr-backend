@@ -50,7 +50,7 @@ func TestGetSchedule_VersionFollowsDataUpdates(t *testing.T) {
 	assert.NotEqual(t, version, scheduleVersionOf(t, after.Body.Bytes()))
 }
 
-// 时间到点前的自动任务翻转由 boundary 覆盖：规则编辑则必须靠记录自身的 UpdatedAt 推进版本
+// 规则编辑必须靠记录自身的 UpdatedAt 推进版本（仅靠时间条件翻转的规则由边缘缓存到期兜底）
 func TestGetSchedule_VersionFollowsAutorunRecordEdits(t *testing.T) {
 	ensureTestDB()
 	router := setupTestRouter()
