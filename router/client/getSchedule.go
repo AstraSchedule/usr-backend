@@ -20,10 +20,9 @@ func GetSchedule(c *gin.Context) {
 	version := c.Query("version") // 可能没有
 	clientDataVersion := int64(0)
 	clientWeekNumber := 0
-	clientBoundary := int64(0)
 	if version != "" {
 		var err error
-		clientDataVersion, clientWeekNumber, clientBoundary, err = parseScheduleVersion(version)
+		clientDataVersion, clientWeekNumber, err = parseScheduleVersion(version)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{ // 400
 				"error": err.Error(),
@@ -54,7 +53,7 @@ func GetSchedule(c *gin.Context) {
 
 	weekNumber := service.CalcWeekNumber(timetable.TimetableConfig.Start, now)
 	// 单日/日期范围/cron 等条件可能在周内改变命中结果：把「下一次变化时刻」写进版本串，
-	// 变化之前 304 缓存照常生效，越过变化点后版本必然不同，客户端下一次请求即拿到新配置
+	// 供边缘缓存决定何时重新取快照；服务端不再用它判定 304（见下方 304 条件）
 	boundary := service.VersionBoundary(records, school, grade, class, now)
 	// 数据版本取作用域内所有会影响响应的时间戳的最大值，而不是只看 data_versions 行：
 	// 管理端保存课表/作息/科目/客户端配置、自动任务与倒数日规则的新增编辑都只写各自的表，
@@ -71,13 +70,14 @@ func GetSchedule(c *gin.Context) {
 		service.LatestCountdownTimestamp(filteredCountdowns),
 	)
 	effectiveVersion := scheduleVersion(dataVersionTs, weekNumber, boundary)
-	// 快照是「今天 + 后 6 天」的滑动窗口：服务端每次算出的到期时间都会随请求日期前移，
-	// 若用相等比较，版本串每天都会变，快照就退化成每天 200。分两种情形：
-	//   - 本次没有变化点（boundary==0，之后不会再变）：数据未变即可 304；
-	//   - 有变化点：只要求客户端手上的快照尚未过期（其边界仍晚于当前时刻）即可 304，
-	//     越过该时刻就必须重新生成快照。（与边缘 scheduleExpired 的判定保持一致）
-	boundaryUsable := boundary == 0 || clientBoundary > now.Unix()
-	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber && boundaryUsable {
+	// 304 只比「数据版本 + 教学周」这两件有身份意义的事实。变化点（版本串第三段）是
+	// 「今天 + 后 6 天」的滑动值：每台设备最后一次生成快照的日期不同，手上的值就不同，
+	// 拿它参与校验会把同一份数据的请求判成不同版本——边缘缓存每个班只有一个槽位，
+	// 只能对上其中一个，其余全部回源（线上 304 反复抵达源站的原因）。
+	// 所以第三段只作响应提示：客户端可以不带，带了也不参与判定。周内变化由数据版本兜底，
+	// 任何写入都会推进 dataVersionTs；仅靠时间条件翻转的自动任务规则要等下一次写入、
+	// 边缘缓存到期或周次变化才对客户端可见。
+	if clientDataVersion == dataVersionTs && clientWeekNumber == weekNumber {
 		c.Status(http.StatusNotModified) // 304
 		return
 	}
@@ -196,33 +196,26 @@ func scheduleVersion(dataVersion int64, weekNumber int, boundary int64) string {
 	return version
 }
 
-func parseScheduleVersion(version string) (int64, int, int64, error) {
+// parseScheduleVersion 解析客户端带来的版本串 dataVersion:weekNumber[:变化点]。
+// 只解析前两段：变化点不再参与服务端校验，客户端可以不带，因此第二段之后的内容一律忽略，
+// 也不再因为它报 400——只有数据版本或教学周本身不合法才算坏版本。
+func parseScheduleVersion(version string) (int64, int, error) {
 	parts := strings.Split(version, ":")
 	if len(parts) == 1 {
 		// 兼容旧客户端发送的纯数据版本；week=0 保证不会误命中新的复合版本。
 		dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
-		return dataVersion, 0, 0, err
-	}
-	if len(parts) > 3 {
-		return 0, 0, 0, strconv.ErrSyntax
+		return dataVersion, 0, err
 	}
 	dataVersion, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, err
 	}
 	weekNumber, err := strconv.Atoi(parts[1])
 	if err != nil || weekNumber < 1 {
 		if err == nil {
 			err = strconv.ErrSyntax
 		}
-		return 0, 0, 0, err
+		return 0, 0, err
 	}
-	boundary := int64(0)
-	if len(parts) == 3 {
-		boundary, err = strconv.ParseInt(parts[2], 10, 64)
-		if err != nil || boundary < 0 {
-			return 0, 0, 0, strconv.ErrSyntax
-		}
-	}
-	return dataVersion, weekNumber, boundary, nil
+	return dataVersion, weekNumber, nil
 }
