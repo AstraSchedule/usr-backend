@@ -23,7 +23,7 @@ func TestGetSchedule_VersionFollowsDataUpdates(t *testing.T) {
 
 	const school, grade, class = "version-school", "2024", "1"
 	require.NoError(t, db.GetDB().Create(&dbTable.Schedule{
-		Namespace: "default", School: school, Grade: grade, Class: class,
+		School: school, Grade: grade, Class: class,
 	}).Error)
 
 	// 首次拉取：没有 data_versions 行，版本的数据部分必须是 0，而不是零值时间的负时间戳
@@ -40,7 +40,7 @@ func TestGetSchedule_VersionFollowsDataUpdates(t *testing.T) {
 	// 跨秒等待模拟 MySQL 的 datetime 精度下限（同一秒内的两次写入时间戳可能相同）。
 	time.Sleep(1100 * time.Millisecond)
 	var row dbTable.Schedule
-	require.NoError(t, db.GetDB().Where("namespace = ? AND school = ? AND grade = ? AND class = ?", "default", school, grade, class).Take(&row).Error)
+	require.NoError(t, db.GetDB().Where("school = ? AND grade = ? AND class = ?", school, grade, class).Take(&row).Error)
 	row.DailyClasses[0] = dbTable.DailyClass{Chinese: "一", English: "MON"}
 	require.NoError(t, db.GetDB().Save(&row).Error)
 
@@ -50,22 +50,22 @@ func TestGetSchedule_VersionFollowsDataUpdates(t *testing.T) {
 	assert.NotEqual(t, version, scheduleVersionOf(t, after.Body.Bytes()))
 }
 
-// 自动任务规则的增删改不写任何数据行，只能靠记录自身的 UpdatedAt 推进版本
+// 规则编辑必须靠记录自身的 UpdatedAt 推进版本（仅靠时间条件翻转的规则由边缘缓存到期兜底）
 func TestGetSchedule_VersionFollowsAutorunRecordEdits(t *testing.T) {
 	ensureTestDB()
 	router := setupTestRouter()
 	router.GET("/:school/:grade/:class", GetSchedule)
 
 	const school, grade, class = "version-autorun", "2024", "2"
-	require.NoError(t, db.GetDB().Create(&dbTable.Schedule{Namespace: "default", School: school, Grade: grade, Class: class}).Error)
+	require.NoError(t, db.GetDB().Create(&dbTable.Schedule{School: school, Grade: grade, Class: class}).Error)
 
 	first := doClientRequest(t, router, http.MethodGet, "/"+school+"/"+grade+"/"+class)
 	require.Equal(t, http.StatusOK, first.Code)
 	version := scheduleVersionOf(t, first.Body.Bytes())
 
+	// 新增一条命中该班级的自动任务规则：不写课表数据，只影响响应
 	time.Sleep(1100 * time.Millisecond)
 	require.NoError(t, db.GetDB().Create(&dbTable.AutorunRecord{
-		Namespace: "default",
 		EType:     1,
 		Scope:     []string{school + "/" + grade + "/" + class},
 		Entries:   []dbTable.AutorunEntry{{}},
