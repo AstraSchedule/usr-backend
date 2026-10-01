@@ -271,10 +271,47 @@ func mergeScopes(oldScopes, newScopes []string) []string {
 	return out
 }
 
+// maxPurgeScopes 单次响应头里最多声明的班级数。
+// 失效声明走响应头，声明过多会把头撑到几 KB（浏览器与 Node 的默认头上限是 8/16KB），
+// 全量导入这类粗作用域只能声明前若干个班级，其余班级的边缘缓存等下一次写入或缓存到期。
+const maxPurgeScopes = 200
+
 // broadcastScopes 在指定租户 namespace 内按作用域列表向在线客户端广播 SyncConfig
-// （仅 WebSocket 模式生效，serverless 自动跳过）。支持 ALL / school / school/grade 粒度；返回成功发送条数。
-func broadcastScopes(ns string, scopes []string) int {
+// （仅 WebSocket 模式生效，serverless 自动跳过），并在响应头里声明本次写入的失效范围
+// （边缘据此删掉对应的课表缓存键）。支持 ALL / school / school/grade 粒度；返回成功发送条数。
+// 删除类操作要先把失效范围取好再删（行删掉后就查不到班级列表了）：见 DeleteSchool/DeleteGrade。
+func broadcastScopes(c *gin.Context, ns string, scopes []string) int {
+	setPurgeScopes(c, purgeScopesOfScopes(ns, scopes))
 	return client.BroadcastScopes(ns, scopes)
+}
+
+// purgeScopesOfClassList 列出该 namespace 下 schedules 表里的班级作用域（school/grade 为空表示不限制）。
+// 查询失败返回 nil：宁可少删缓存，也不要让写请求因为失效声明而失败。
+func purgeScopesOfClassList(ns, school, grade string) []string {
+	type classScopeRow struct {
+		School string
+		Grade  string
+		Class  string
+	}
+	rows := make([]classScopeRow, 0)
+	query := db.GetDB().Model(&dbTable.Schedule{}).Where("namespace = ?", ns).Select("DISTINCT school, grade, class")
+	if school != "" {
+		query = query.Where("school = ?", school)
+	}
+	if grade != "" {
+		query = query.Where("grade = ?", grade)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil
+	}
+	scopes := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.School == "" || row.Grade == "" || row.Class == "" {
+			continue
+		}
+		scopes = append(scopes, purgeScope(row.School, row.Grade, row.Class))
+	}
+	return scopes
 }
 
 // bumpDataVersionForDeletedScopes 为「删除操作」推进数据版本。
@@ -353,19 +390,47 @@ func purgeScope(school, grade, class string) string {
 
 // purgeScopesOfGrade 把年级级改动展开成该年级下所有班级的作用域：
 // 边缘的 KV 键是班级粒度，年级级写入必须逐班声明，否则缓存不会失效。
-func purgeScopesOfGrade(school, grade string) []string {
-	classes := make([]string, 0)
-	if err := db.GetDB().Model(&dbTable.Schedule{}).
-		Where("school = ? AND grade = ?", school, grade).
-		Pluck("class", &classes).Error; err != nil {
-		return nil
+func purgeScopesOfGrade(ns, school, grade string) []string {
+	return purgeScopesOfClassList(ns, school, grade)
+}
+
+// purgeScopesOfScope 把一个作用域展开成班级作用域：
+// ALL / school / school/grade 都要落到具体班级，因为边缘的键是班级粒度、不能按前缀删。
+func purgeScopesOfScope(ns, scope string) []string {
+	parts := strings.Split(strings.TrimSpace(scope), "/")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
 	}
-	scopes := make([]string, 0, len(classes))
-	for _, class := range classes {
-		if class == "" {
-			continue
+	switch {
+	case len(parts) == 1 && (parts[0] == "" || strings.EqualFold(parts[0], "ALL")):
+		return purgeScopesOfClassList(ns, "", "")
+	case len(parts) == 1:
+		return purgeScopesOfClassList(ns, parts[0], "")
+	case parts[0] != "" && parts[1] != "":
+		if len(parts) >= 3 && parts[2] != "" {
+			return []string{purgeScope(parts[0], parts[1], parts[2])}
 		}
-		scopes = append(scopes, purgeScope(school, grade, class))
+		return purgeScopesOfGrade(ns, parts[0], parts[1])
 	}
-	return scopes
+	return nil
+}
+
+// purgeScopesOfScopes 合并多个作用域的展开结果并去重，并把响应头的上限兜住。
+func purgeScopesOfScopes(ns string, scopes []string) []string {
+	seen := make(map[string]bool)
+	merged := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		for _, classScope := range purgeScopesOfScope(ns, scope) {
+			if seen[classScope] {
+				continue
+			}
+			seen[classScope] = true
+			merged = append(merged, classScope)
+		}
+	}
+	if len(merged) > maxPurgeScopes {
+		logrus.Warnf("本次写入影响的班级数 %d 超过失效声明上限 %d，仅声明前 %d 个", len(merged), maxPurgeScopes, maxPurgeScopes)
+		return merged[:maxPurgeScopes]
+	}
+	return merged
 }

@@ -74,7 +74,7 @@ func handleImportBackup(c *gin.Context, mode string) {
 	}
 
 	// 全量数据变更，广播当前租户所有在线客户端刷新
-	broadcastScopes(overrideNs, []string{"ALL"})
+	broadcastScopes(c, overrideNs, []string{"ALL"})
 
 	resp := gin.H{"status": 200, "message": "备份导入完成", "data": result}
 	if mode != "overwrite" {
