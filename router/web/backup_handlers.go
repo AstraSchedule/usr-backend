@@ -59,7 +59,7 @@ func ImportBackup(c *gin.Context) {
 	}
 
 	// 全量数据变更，广播所有在线客户端刷新
-	broadcastScopes([]string{"ALL"})
+	broadcastScopes(c, []string{"ALL"})
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  200,
@@ -155,7 +155,7 @@ func FullImportBackup(c *gin.Context) {
 	}
 
 	// 全量数据变更，广播所有在线客户端刷新
-	broadcastScopes([]string{"ALL"})
+	broadcastScopes(c, []string{"ALL"})
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  200,
