@@ -86,17 +86,22 @@ func TestBroadcastScopesDeclaresPurgeHeader(t *testing.T) {
 }
 
 // 全量导入这类粗作用域不能把响应头撑爆：超过上限时截断。
+// 删除学校/年级会直接调 setPurgeScopes，所以上限必须兜在写头的那一个出口上。
 func TestPurgeScopesOfScopesCapsHeaderSize(t *testing.T) {
 	classes := make([][3]string, 0, maxPurgeScopes+5)
 	for i := 0; i < maxPurgeScopes+5; i++ {
 		classes = append(classes, [3]string{"s1", "g1", strconv.Itoa(i + 1)})
 	}
 	seedScheduleClasses(t, classes...)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
 
-	got := purgeScopesOfScopes([]string{"ALL"})
+	broadcastScopes(c, []string{"ALL"})
 
-	require.Len(t, got, maxPurgeScopes)
-	assert.Contains(t, got, "s1/g1/1")
+	header := strings.Split(w.Header().Get(purgeScopesHeader), ",")
+	require.Len(t, header, maxPurgeScopes)
+	assert.Contains(t, header, "s1/g1/1")
 }
 
 // 删除年级会把班级行一起带走：失效范围必须在删除前取好，否则缓存永远停在旧课表。

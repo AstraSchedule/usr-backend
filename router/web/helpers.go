@@ -364,6 +364,7 @@ const purgeScopesHeader = "X-Astra-Purge-Scopes"
 // setPurgeScopes 在响应头里声明本次写入的失效范围。
 // 必须在写响应体（c.JSON）之前调用——响应一旦开始写出，头就改不动了。
 // 空列表不设置该头：没有失效声明等价于「这次写入与缓存无关」。
+// 超过 maxPurgeScopes 时截断：这是所有调用方的唯一出口，删除学校/年级会直接调它，绕不过去。
 func setPurgeScopes(c *gin.Context, scopes []string) {
 	cleaned := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -373,6 +374,10 @@ func setPurgeScopes(c *gin.Context, scopes []string) {
 	}
 	if len(cleaned) == 0 {
 		return
+	}
+	if len(cleaned) > maxPurgeScopes {
+		logrus.Warnf("本次写入影响的班级数 %d 超过失效声明上限 %d，仅声明前 %d 个", len(cleaned), maxPurgeScopes, maxPurgeScopes)
+		cleaned = cleaned[:maxPurgeScopes]
 	}
 	c.Header(purgeScopesHeader, strings.Join(cleaned, ","))
 }
@@ -409,7 +414,8 @@ func purgeScopesOfScope(scope string) []string {
 	return nil
 }
 
-// purgeScopesOfScopes 合并多个作用域的展开结果并去重，并把响应头的上限兜住。
+// purgeScopesOfScopes 合并多个作用域的展开结果并去重。
+// 响应头长度上限由 setPurgeScopes 统一兜住（删除学校/年级会直接调它，不能只兜在展开函数里）。
 func purgeScopesOfScopes(scopes []string) []string {
 	seen := make(map[string]bool)
 	merged := make([]string, 0, len(scopes))
@@ -421,10 +427,6 @@ func purgeScopesOfScopes(scopes []string) []string {
 			seen[classScope] = true
 			merged = append(merged, classScope)
 		}
-	}
-	if len(merged) > maxPurgeScopes {
-		logrus.Warnf("本次写入影响的班级数 %d 超过失效声明上限 %d，仅声明前 %d 个", len(merged), maxPurgeScopes, maxPurgeScopes)
-		return merged[:maxPurgeScopes]
 	}
 	return merged
 }
