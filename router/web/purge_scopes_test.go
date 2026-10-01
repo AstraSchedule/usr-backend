@@ -48,14 +48,14 @@ func TestPurgeScopesOfGradeExpandsClasses(t *testing.T) {
 
 	for _, class := range []string{"1", "2", ""} {
 		require.NoError(t, conn.Create(&dbTable.Schedule{
-			School: "s1", Grade: "g1", Class: class,
+			Namespace: "default", School: "s1", Grade: "g1", Class: class,
 		}).Error)
 	}
 	require.NoError(t, conn.Create(&dbTable.Schedule{
-		School: "s1", Grade: "g2", Class: "1",
+		Namespace: "default", School: "s1", Grade: "g2", Class: "1",
 	}).Error)
 
-	got := purgeScopesOfGrade("s1", "g1")
+	got := purgeScopesOfGrade("default", "s1", "g1")
 
 	assert.ElementsMatch(t, []string{"s1/g1/1", "s1/g1/2"}, got)
 }

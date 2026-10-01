@@ -165,7 +165,7 @@ func PutSubjects(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(ns, school, grade)
-	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
+	setPurgeScopes(c, purgeScopesOfGrade(ns, school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 
@@ -244,7 +244,7 @@ func PutTimetable(c *gin.Context) {
 		return
 	}
 	client.BroadcastSync(ns, school, grade)
-	setPurgeScopes(c, purgeScopesOfGrade(school, grade))
+	setPurgeScopes(c, purgeScopesOfGrade(ns, school, grade))
 	c.JSON(http.StatusOK, gin.H{"status": 200})
 }
 

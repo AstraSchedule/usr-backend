@@ -168,6 +168,9 @@ func DeleteSchool(c *gin.Context) {
 	// 安全修复：删除必须限定当前请求的 namespace，防止跨租户删除数据
 	ns := middleware.GetNamespace(c)
 
+	// 删除会带走该学校所有班级的 Schedule 行，失效范围必须在删除前取好（删完就查不到班级列表）
+	staleScopes := purgeScopesOfClassList(ns, school, "")
+
 	tx := db.GetDB().Begin()
 	defer func() {
 		if recover() != nil {
@@ -189,7 +192,8 @@ func DeleteSchool(c *gin.Context) {
 	if !commitOr500(c, tx) {
 		return
 	}
-	broadcastScopes(ns, []string{school})
+	broadcastScopes(c, ns, []string{school})
+	setPurgeScopes(c, staleScopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "学校已删除"})
 }
 
@@ -284,7 +288,7 @@ func CreateGrade(c *gin.Context) {
 	}
 
 	// 年级创建生成默认科目/作息，广播该年级客户端刷新
-	broadcastScopes(ns, []string{school + "/" + req.Name})
+	broadcastScopes(c, ns, []string{school + "/" + req.Name})
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "年级创建成功"})
 }
 
@@ -297,6 +301,9 @@ func DeleteGrade(c *gin.Context) {
 
 	// 安全修复：删除必须限定当前请求的 namespace，防止跨租户删除数据
 	ns := middleware.GetNamespace(c)
+
+	// 删除会带走该年级所有班级的 Schedule 行，失效范围必须在删除前取好（删完就查不到班级列表）
+	staleScopes := purgeScopesOfGrade(ns, school, grade)
 
 	tx := db.GetDB().Begin()
 	defer func() {
@@ -319,7 +326,8 @@ func DeleteGrade(c *gin.Context) {
 	if !commitOr500(c, tx) {
 		return
 	}
-	broadcastScopes(ns, []string{school + "/" + grade})
+	broadcastScopes(c, ns, []string{school + "/" + grade})
+	setPurgeScopes(c, staleScopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "年级已删除"})
 }
 
@@ -437,7 +445,7 @@ func CreateClass(c *gin.Context) {
 	}
 
 	// 班级创建生成默认课表与客户端配置，提交成功后才广播该年级客户端刷新
-	broadcastScopes(ns, []string{school + "/" + grade})
+	broadcastScopes(c, ns, []string{school + "/" + grade})
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "班级创建成功"})
 }
 
@@ -478,7 +486,7 @@ func DeleteClass(c *gin.Context) {
 	if !commitOr500(c, tx) {
 		return
 	}
-	broadcastScopes(ns, []string{school + "/" + grade})
+	broadcastScopes(c, ns, []string{school + "/" + grade})
 	setPurgeScopes(c, []string{purgeScope(school, grade, classNumber)})
 	c.JSON(http.StatusOK, gin.H{"status": 200, "message": "班级已删除"})
 }

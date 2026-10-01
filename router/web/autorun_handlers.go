@@ -315,7 +315,7 @@ func saveAutorunRecord(c *gin.Context, ns string, record dbTable.AutorunRecord, 
 	}
 	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
 	// 规则变更影响课表解析，按新旧作用域并集广播刷新
-	broadcastScopes(ns, mergeScopes(oldScopes, record.Scope))
+	broadcastScopes(c, ns, mergeScopes(oldScopes, record.Scope))
 	c.JSON(http.StatusOK, gin.H{"status": 200, "id": record.HashID})
 	return true
 }
@@ -582,7 +582,7 @@ func DeleteAutorunRecord(c *gin.Context) {
 		return
 	}
 	_, _ = db.RefreshAutorunStatusesNs(ns, time.Now())
-	broadcastScopes(ns, scopes)
+	broadcastScopes(c, ns, scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": hashid})
 }
 
@@ -595,7 +595,7 @@ func DeleteExpiredAutorunRecords(c *gin.Context) {
 		return
 	}
 	if deleted > 0 {
-		broadcastScopes(ns, scopes)
+		broadcastScopes(c, ns, scopes)
 	}
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": deleted})
 }
