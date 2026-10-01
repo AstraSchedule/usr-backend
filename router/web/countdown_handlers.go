@@ -187,7 +187,7 @@ func PutCountdownRule(c *gin.Context) {
 		return
 	}
 	// 倒数日变更影响客户端倒数日展示，按新旧作用域并集广播刷新
-	broadcastScopes(mergeScopes(oldScopes, scope))
+	broadcastScopes(c, mergeScopes(oldScopes, scope))
 	c.JSON(http.StatusOK, gin.H{"status": 200, "id": recordID})
 }
 
@@ -209,6 +209,6 @@ func DeleteCountdownRecord(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "记录不存在"})
 		return
 	}
-	broadcastScopes(scopes)
+	broadcastScopes(c, scopes)
 	c.JSON(http.StatusOK, gin.H{"status": 200, "deleted": affected, "id": id})
 }
