@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,14 @@ var clientConfigSettingKeys = map[string]bool{
 	"isAlwaysMinimized":      true, // 始终缩小
 	"isDuringClassCountdown": true, // 课上计时
 }
+
+// clientConfigTextSettingKeys 自动任务可以覆盖的文本型配置项（取值是文案而不是开关）
+var clientConfigTextSettingKeys = map[string]bool{
+	"end_banner_text": true, // 结束横幅文案
+}
+
+// clientConfigTextMaxLen 文本型配置项的长度上限，避免超长文案把课表布局撑坏
+const clientConfigTextMaxLen = 200
 
 func badRequestDetail(c *gin.Context, detail string) {
 	c.JSON(http.StatusBadRequest, gin.H{"detail": detail})
@@ -70,6 +79,16 @@ func validateClientConfigAction(action map[string]interface{}) string {
 		return "settings 必须为非空对象"
 	}
 	for key, value := range settings {
+		if clientConfigTextSettingKeys[key] {
+			text, ok := value.(string)
+			if !ok {
+				return "settings." + key + " 必须为字符串"
+			}
+			if utf8.RuneCountInString(text) > clientConfigTextMaxLen {
+				return "settings." + key + " 长度不能超过 " + strconv.Itoa(clientConfigTextMaxLen) + " 个字符"
+			}
+			continue
+		}
 		if !clientConfigSettingKeys[key] {
 			return "settings 含不支持的配置项: " + key
 		}
@@ -256,6 +275,12 @@ func validateEntryCondition(when *dbTable.AutorunCondition, etype int) string {
 		return validateEventCondition(when, etype)
 	case dbTable.AutorunWhenCron:
 		return validateCronCondition(when)
+	case dbTable.AutorunWhenTomorrowNoClass:
+		// 「明天没课」只在桌面端求值，服务端解析课表时用不到这个条件
+		if etype != dbTable.AutorunTypeClientConfig {
+			return "when.kind=tomorrow_no_class 仅支持客户端配置类型"
+		}
+		return ""
 	default:
 		return "when.kind 不受支持"
 	}

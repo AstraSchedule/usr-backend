@@ -168,6 +168,7 @@ func GetSchedule(c *gin.Context) {
 		"weather_alert_brief":    fullResponse.WeatherAlertBrief,
 		"week_display":           fullResponse.WeekDisplay,
 		"banner_text":            fullResponse.BannerText,
+		"end_banner_text":        fullResponse.EndBannerText,
 		"css_style":              fullResponse.CSSStyle,
 		"startup_behavior":       fullResponse.StartupBehavior,
 		"temperature_colors":     fullResponse.TemperatureColors,

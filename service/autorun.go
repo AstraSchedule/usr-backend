@@ -99,6 +99,10 @@ func MatchCondition(when *dbTable.AutorunCondition, ctx RuleContext) bool {
 	case dbTable.AutorunWhenCron:
 		start, end, ok := cronWindow(when, now)
 		return ok && !now.Before(start) && now.Before(end)
+	case dbTable.AutorunWhenTomorrowNoClass:
+		// 「明天没课」需要课表上下文，服务端手里只有调节目的 records 与作息表，
+		// 没有「明天有没有课」的判定依据；该条件只由桌面端求值，服务端恒不生效。
+		return false
 	default:
 		return false
 	}

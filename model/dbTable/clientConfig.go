@@ -18,6 +18,8 @@ type ClientConfigItems struct {
 	WeatherAlertBrief    bool                    `json:"weather_alert_brief"`
 	WeekDisplay          bool                    `json:"week_display"`
 	BannerText           string                  `json:"banner_text"`
+	// EndBannerText 今日课程结束后覆盖课表位置显示的文案，留空则改为预览下一个有课日
+	EndBannerText string `json:"end_banner_text"`
 	CSSStyle             map[string]string       `json:"css_style" gorm:"type:json;not null;serializer:json"`
 	TemperatureColors    TemperatureColorsConfig `json:"temperature_colors" gorm:"type:json;serializer:json"`
 	StartupBehavior      string                  `json:"startup_behavior" gorm:"default:'normal';size:20"`
