@@ -207,6 +207,7 @@ func importClientConfigs(tx *gorm.DB, rows []dbTable.ClientConfig, mode string) 
 			"weather_alert_brief",
 			"week_display",
 			"banner_text",
+			"end_banner_text",
 			"css_style",
 			"startup_behavior",
 		},

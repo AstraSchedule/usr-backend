@@ -22,6 +22,9 @@ const (
 	AutorunWhenWeekly = "weekly" // 每 N 周轮换
 	AutorunWhenEvent  = "event"  // 时刻事件（节次开始/结束等）
 	AutorunWhenCron   = "cron"   // cron 表达式
+	// AutorunWhenTomorrowNoClass 明天没课：服务端解析课表时没有「明天是否有课」的上下文，
+	// 该条件只由桌面端求值，服务端 MatchCondition 恒返回 false
+	AutorunWhenTomorrowNoClass = "tomorrow_no_class"
 )
 
 // 时刻事件类型（AutorunCondition.Event）
